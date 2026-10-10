@@ -1,0 +1,34 @@
+name: Sync Google Sheet
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'     # 每 3 小時（UTC 整點）
+  workflow_dispatch: {}       # 可在 Actions 頁面手動按 Run
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-sheet
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install openpyxl
+      - run: python tools/sync_sheet.py
+      - name: Commit if changed
+        run: |
+          git config user.name "sheet-sync-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/places.json data/sheet_plan.json data/src/link_cache.json data/src/geocode_cache.json
+          if git diff --cached --quiet -- data/places.json data/src/link_cache.json data/src/geocode_cache.json && \
+             [ "$(git diff --cached -- data/sheet_plan.json | grep -c '^[+-] ' )" -le 2 ]; then
+            echo "Sheet 沒有變動"; exit 0
+          fi
+          git commit -m "Sync from Google Sheet" && git push

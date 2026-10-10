@@ -7,7 +7,7 @@
 import json, glob, re, sys, time, math, os, urllib.request, urllib.parse
 
 RAW = sys.argv[1] if len(sys.argv) > 1 else '../_raw'
-OUT = os.path.join(os.path.dirname(__file__), '..', 'data', 'places.json')
+OUT = os.path.join(os.path.dirname(__file__), '..', 'data', 'src', 'base_places.json')   # 之後跑 sync_sheet.py 套上 Sheet 最新內容 → data/places.json
 AREAS = json.load(open(os.path.join(os.path.dirname(__file__), '..', 'data', 'areas.json'), encoding='utf-8'))
 
 TYPE_RULES = [  # 依序比對 Sheet 的「餐廳類型」

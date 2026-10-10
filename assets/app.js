@@ -34,7 +34,7 @@ const ICON = {
   arrow: '<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
 };
 
-let trip, places, areas, byId;
+let trip, places, areas, byId, sheetPlan = { days: {}, wish: {} };
 const S = { me: localStorage.getItem('me') || '', tab: 'plan', day: null, pos: null, records: [], type: '', favOnly: false, mview: 'list', routeDay: null, sel: null };
 
 /* ---------- 儲存層：localStorage ＋ Google Apps Script（五人同步） ---------- */
@@ -124,7 +124,7 @@ function travel(a, b) { // 直線距離估算交通時間（僅供參考）
 }
 
 /* ---------- 收藏 ---------- */
-const favsOf = m => new Set([...(trip.wishlists?.[m] || []), ...Store.of('fav').filter(r => r.member === m).map(r => r.place)]);
+const favsOf = m => new Set([...(trip.wishlists?.[m] || []), ...(sheetPlan.wish?.[m] || []), ...places.filter(p => p.voters?.includes(m)).map(p => p.id), ...Store.of('fav').filter(r => r.member === m).map(r => r.place)]);
 const isFav = id => favsOf(S.me).has(id);
 async function toggleFav(id) {
   if (!S.me) return pickMe();
@@ -136,7 +136,9 @@ async function toggleFav(id) {
 /* ---------- 行程資料：trip.json + 自己加的 ---------- */
 function dayItems(d) {
   const hidden = new Set(Store.of('planHide').map(r => r.key));   // trip.json 內建的行程被移除／改過
-  const base = (trip.days[d] || []).map((it, i) => ({ ...it, date: d, _k: `t:${d}:${i}` })).filter(it => !hidden.has(it._k));
+  const base = [...(trip.days[d] || []).map((it, i) => ({ ...it, date: d, _k: `t:${d}:${i}` })),
+    ...(sheetPlan.days[d] || []).map(it => ({ ...it, date: d, fromSheet: true, _k: `s:${d}:${it.place || it.title}:${it.slot}` }))]   // Sheet「餐廳安排」
+    .filter(it => !hidden.has(it._k));
   const added = Store.of('plan').filter(r => r.date === d).map(r => ({ ...r, _k: r.id, mine: true }));
   let last = '00:00';
   const byTime = [...base, ...added].map((it, i) => { const k = it.time || last; last = k; return { it, k, i }; })
@@ -319,7 +321,7 @@ function renderPlan() {
   const cnt = diff > 0 ? `<div class="count">倒數<b>${diff}</b>天</div>` : td <= end ? `<div class="count">今天是<b>D${dayNo(td)}</b></div>` : '<div class="count">旅程<b>完成</b>🎉</div>';
   $('#hero').innerHTML = `<div class="eyebrow">Tokyo · ${trip.members.length} men</div><h1>${h(trip.title)}</h1><div class="dates">${h(trip.subtitle)}</div>
     <div class="row"><div class="av-stack">${trip.members.map(m => av(m.id)).join('')}</div>${cnt}</div>
-    <div class="stats"><span>📍 ${places.length} 個候選</span><span>🗓️ ${plannedIds().size} 個已排</span>${S.me ? `<span>★ 我收藏 ${favsOf(S.me).size}</span>` : ''}</div>`;
+    <div class="stats"><span>📍 ${places.length} 個候選</span><span>🗓️ ${plannedIds().size} 個已排</span>${S.me ? `<span>★ 我收藏 ${favsOf(S.me).size}</span>` : ''}${sheetPlan.updated ? `<span>📄 Sheet ${h(fmtTs(sheetPlan.updated))} 更新</span>` : ''}</div>`;
   $('#dayTabs').innerHTML = trip.dates.map(d => `<button class="daytab ${d === S.day ? 'on' : ''} ${d === td ? 'today' : ''}" data-day="${d}"><b>D${dayNo(d)}</b><small>${dayLabel(d)}</small></button>`).join('');
   const items = dayItems(S.day), lod = trip.lodging;
   const stops = items.filter(i => byId[i.place]);
@@ -340,7 +342,7 @@ function renderPlan() {
           <span class="tl-grip" aria-label="按住拖拉調整順序"><svg viewBox="0 0 24 24"><path d="M5 9h14M5 15h14"/></svg></span>
           <div class="tl-time">${h(it.time || '')}${it.time ? ' · ' : ''}${h(it.slot || '')}</div>
           <h4>${t.icon} ${h(p.name)}</h4>
-          <div class="meta"><span>${h(p.subcat || p.type)}</span><span>${h(p.area)}</span>${it.mine && !it.fromTrip ? `<span>由 ${h(memberName(it.createdBy))} 加入</span>` : ''}</div>
+          <div class="meta"><span>${h(p.subcat || p.type)}</span><span>${h(p.area)}</span>${it.fromSheet ? '<span>📄 Sheet</span>' : it.mine && !it.fromTrip ? `<span>由 ${h(memberName(it.createdBy))} 加入</span>` : ''}</div>
           <div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${it.note ? `<span class="badge warn">📝 ${h(it.note)}</span>` : ''}${cd ? '<span class="badge warn">⚠️ 今天公休</span>' : ''}</div>
         </div></div></li>`);
       if (p.lat) prev = p;
@@ -704,7 +706,8 @@ function bind() {
 }
 async function main() {
   const j = u => fetch(u).then(r => r.json());
-  [trip, places, areas] = await Promise.all([j(CFG.tripFile), j(CFG.placesFile), j(CFG.areasFile)]);
+  [trip, places, areas, sheetPlan] = await Promise.all([j(CFG.tripFile), j(CFG.placesFile), j(CFG.areasFile),
+    j(CFG.sheetPlanFile || 'data/sheet_plan.json').catch(() => ({ days: {}, wish: {} }))]);
   byId = Object.fromEntries(places.map(p => [p.id, p]));
   document.title = trip.title; $('#appTitle').textContent = trip.short || trip.title;
   S.tab = Pref.get('tab', 'plan');
