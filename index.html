@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tokyo Trip</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="title">
+    <h1 id="tripTitle">Tokyo Trip</h1>
+    <div class="sub" id="tripSub"></div>
+  </div>
+  <div class="who">
+    <label for="meSelect">我是</label>
+    <select id="meSelect"></select>
+  </div>
+</header>
+
+<div id="areaBanner" class="area-banner" hidden></div>
+
+<main>
+  <!-- 行程 -->
+  <section id="tab-plan" class="tab">
+    <div class="chips" id="dayChips"></div>
+    <div id="planInfo"></div>
+    <ol class="timeline" id="timeline"></ol>
+    <h3 class="sec">我的收藏（還沒排進行程）</h3>
+    <div id="favList" class="cards"></div>
+  </section>
+
+  <!-- 地圖 -->
+  <section id="tab-map" class="tab" hidden>
+    <div class="chips" id="mapTypeChips"></div>
+    <div class="map-wrap">
+      <div id="map"></div>
+      <button id="locateBtn" class="fab" title="我在哪">◎ 我在哪</button>
+    </div>
+    <div id="nearby" class="cards"></div>
+  </section>
+
+  <!-- 清單 -->
+  <section id="tab-list" class="tab" hidden>
+    <div class="filters">
+      <input id="q" type="search" placeholder="搜尋店名、品項、備註…">
+      <select id="fType"><option value="">全部類型</option></select>
+      <select id="fArea"><option value="">全部區域</option></select>
+      <select id="fDay"><option value="">不限日期</option></select>
+      <select id="fSort">
+        <option value="votes">排序：投票數</option>
+        <option value="rating">排序：Google 評分</option>
+        <option value="dist">排序：離我最近</option>
+        <option value="name">排序：名稱</option>
+      </select>
+      <label class="chk"><input id="fFav" type="checkbox"> 只看我的收藏</label>
+    </div>
+    <div class="count" id="listCount"></div>
+    <div id="list" class="cards"></div>
+  </section>
+
+  <!-- 統計 -->
+  <section id="tab-stats" class="tab" hidden>
+    <div class="tiles" id="tiles"></div>
+    <h3 class="sec">各區候選數量</h3>
+    <div class="legend" id="areaLegend"></div>
+    <div id="chartArea" class="chart"></div>
+    <h3 class="sec">類型 × 區域</h3>
+    <div id="matrix" class="matrix"></div>
+    <div id="ratingSec" hidden>
+      <h3 class="sec">Google 評分分布</h3>
+      <div id="chartRating" class="chart"></div>
+    </div>
+  </section>
+
+  <!-- 記帳 -->
+  <section id="tab-money" class="tab" hidden>
+    <div class="sync" id="syncState"></div>
+    <form id="expForm" class="exp-form">
+      <input name="title" placeholder="項目（例：Peter Luger 午餐）" required>
+      <div class="row">
+        <input name="amount" type="number" step="1" min="0" placeholder="金額" required>
+        <select name="currency"><option>JPY</option><option>TWD</option></select>
+        <input name="date" type="date">
+      </div>
+      <div class="row">
+        <label>誰付的 <select name="payer"></select></label>
+      </div>
+      <div class="split" id="splitBox"></div>
+      <button type="submit">新增一筆</button>
+    </form>
+    <h3 class="sec">結算（誰該給誰）</h3>
+    <div id="settle"></div>
+    <h3 class="sec">每人淨額</h3>
+    <div id="balances"></div>
+    <h3 class="sec">明細</h3>
+    <div id="expList"></div>
+  </section>
+</main>
+
+<nav class="bottom">
+  <button data-tab="plan" class="on">🗓️<span>行程</span></button>
+  <button data-tab="map">🗺️<span>地圖</span></button>
+  <button data-tab="list">📋<span>清單</span></button>
+  <button data-tab="stats">📊<span>統計</span></button>
+  <button data-tab="money">💴<span>記帳</span></button>
+</nav>
+
+<div id="tip" class="tip" hidden></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="config.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

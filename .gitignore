@@ -1,0 +1,3 @@
+# 原始資料（IG 匯出、Sheet 下載）不要進 repo
+_raw/
+*.zip
