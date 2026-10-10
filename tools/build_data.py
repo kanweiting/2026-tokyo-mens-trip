@@ -63,11 +63,11 @@ places = []
 for x in json.load(open(os.path.join(RAW, 'restaurants_raw.json'), encoding='utf-8')):
     name = (x['name'] or '').split('\n')[0].strip() or (x['mapName'] or '').strip()
     if not name or not x['lat']: continue           # 超商、整理清單等沒有地點的列不收
-    votes = len(re.findall(r'[EＥ]', x['vote'] or ''))
+    votes = len(re.findall(r'[EＥ芃]', x['vote'] or ''))   # Sheet 投票欄：E／芃 = 芃（eddie）
     places.append(dict(id=f"s{int(float(x['id']))}", name=name, name_en=(x['mapName'] or '').strip(),
         type=sheet_type(x['cat']), subcat=(x['cat'] or '').replace('\n', ' '), closed=x['closed'] if x['closed'] not in ('-', None) else '',
         note=(x['note'] or '').strip(), price='', lat=x['lat'], lng=x['lng'], approx=False, map=x['mapUrl'],
-        ig=x['ig'], votes=votes, voters=['Eddie'] * votes, src=['sheet'], sharedBy=[], rating=None, ratingCount=None))
+        ig=x['ig'], votes=votes, voters=['eddie'] if votes else [], src=['sheet'], sharedBy=[], rating=None, ratingCount=None))
 
 # ---------- IG ----------
 idx = {}
@@ -82,8 +82,48 @@ def find(n1, n2):
             if len(kk) >= 5 and len(k) >= 5 and (kk in k or k in kk): return p
     return None
 
-NICK = {'Jerry Kan': 'Jerry', 'Aron Lin': 'Aron', 'Chung Kai Yu': 'Kaiyu', '盅舖師': 'Wei'}
-SHORT = lambda s: NICK.get(s, 'Eddie' if 'Eddie' in s or '𝑬𝒅𝒅𝒊𝒆' in s else s)
+# IG 顯示名稱 → trip.json 成員 id（網站上顯示的名字以 trip.json 為準）
+NICK = {'Jerry Kan': 'jerry', 'Aron Lin': 'aron', 'Chung Kai Yu': 'kaiyu', '盅舖師': 'wei'}
+SHORT = lambda s: NICK.get(s, 'eddie' if 'Eddie' in s or '𝑬𝒅𝒅𝒊𝒆' in s else s)
+def excerpt(cap, names):
+    """從貼文文案切出跟這個地點有關的一段（約 120 字），當作「評論」顯示"""
+    cap = re.sub(r'#\S+', '', cap or '')
+    cap = re.sub(r'\n{2,}', '\n', cap).strip()
+    if not cap: return ''
+    low = cap.lower(); pos = -1
+    for n in names:
+        for k in filter(lambda k: len(k) >= 2, [n, re.sub(r'[（(].*', '', n or '').strip()]):
+            i = low.find(k.lower())
+            if i >= 0: pos = i; break
+        if pos >= 0: break
+    if pos >= 0 and cap.count('📍') > 2:          # 懶人包：取這個店名那一段
+        seg = cap[pos:]; nxt = seg.find('📍', 1); seg = seg[:nxt if nxt > 0 else 160]
+    else:
+        seg = cap
+    seg = re.sub(r'\s*\n\s*', ' / ', seg).strip(' /')
+    return seg[:120] + ('…' if len(seg) > 120 else '')
+
+def add_comment(p, c):
+    p.setdefault('comments', [])
+    if c['text'] and len(c['text']) > 6 and all(c['text'][:30] != x['text'][:30] for x in p['comments']) and len(p['comments']) < 4:
+        p['comments'].append(c)
+
+new_place = lambda q, pid, listy: dict(id=pid, name=q['name'].strip(), name_en=(q.get('name_en') or '').strip(), type=q.get('type') or '其他',
+    subcat=q.get('subcat', ''), closed='', note=q.get('note', ''), price=q.get('price', ''), address=q.get('address', ''),
+    hintArea=q.get('area', ''), lat=q.get('lat'), lng=q.get('lng'), approx=q.get('lat') is None, map=q.get('map'), ig=[], threads=[], votes=0, voters=[], src=[],
+    sharedBy=[], rating=None, ratingCount=None, fromList=listy)
+def register(p):
+    places.append(p)
+    for k in (norm(p['name']), norm(p['name_en'])):
+        if len(k) >= 3: idx[k] = p
+
+captions = {l['url'].split('?')[0]: l for l in json.load(open(os.path.join(RAW, 'ig_links.json'), encoding='utf-8'))}
+# subagent 從文案挑出的評論句（ig_quotes_*.json）；沒有這些檔才退回機械式摘錄
+QUOTES = {}
+for f in glob.glob(os.path.join(RAW, 'ig_quotes_*.json')):
+    for r in json.load(open(f, encoding='utf-8')):
+        QUOTES[(r['url'].split('?')[0], r['place'])] = r
+
 n_ig = 0; n_new = 0
 for f in sorted(glob.glob(os.path.join(RAW, 'ig_places_*.json'))):
     for post in json.load(open(f, encoding='utf-8')):
@@ -95,14 +135,7 @@ for f in sorted(glob.glob(os.path.join(RAW, 'ig_places_*.json'))):
             if q.get('type') == '住宿': continue
             p = find(q.get('name'), q.get('name_en'))
             if not p:
-                n_new += 1
-                p = dict(id=f"i{n_new}", name=q['name'].strip(), name_en=(q.get('name_en') or '').strip(), type=q.get('type') or '其他',
-                    subcat=q.get('subcat', ''), closed='', note=q.get('note', ''), price=q.get('price', ''), address=q.get('address', ''),
-                    hintArea=q.get('area', ''), lat=None, lng=None, approx=True, map=None, ig=[], votes=0, voters=[], src=[], sharedBy=[],
-                    rating=None, ratingCount=None, fromList=listy)
-                places.append(p)
-                for k in (norm(p['name']), norm(p['name_en'])):
-                    if len(k) >= 3: idx[k] = p
+                n_new += 1; p = new_place(q, f"i{n_new}", listy); register(p)
             if 'ig' not in p['src']: p['src'].append('ig')
             if url and url not in p['ig']: p['ig'].append(url)
             s = SHORT(sender)
@@ -110,6 +143,57 @@ for f in sorted(glob.glob(os.path.join(RAW, 'ig_places_*.json'))):
             if not listy: p['fromList'] = False
             if not p.get('note') and q.get('note'): p['note'] = q['note']
             if not p.get('price') and q.get('price'): p['price'] = q['price']
+            cap = captions.get(url, {}); by = '@' + (cap.get('owner') or 'instagram')
+            if QUOTES:
+                for t in QUOTES.get((url, q.get('name')), {}).get('quotes', [])[:2]:
+                    add_comment(p, dict(src='ig', by=by, url=url, text=t))
+            else:
+                add_comment(p, dict(src='ig', by=by, url=url, text=excerpt(cap.get('caption'), [q.get('name'), q.get('name_en'), p['name'], p['name_en']])))
+
+# ---------- Threads（Jerry 按讚過的貼文，subagent 抽成 threads_places_*.json） ----------
+n_th = 0
+for f in sorted(glob.glob(os.path.join(RAW, 'threads_places_*.json'))):
+    for post in json.load(open(f, encoding='utf-8')):
+        url = post.get('url', '')
+        for q in post.get('places', []):
+            if q.get('type') == '住宿': continue
+            p = find(q.get('name'), q.get('name_en'))
+            if not p:
+                n_new += 1; n_th += 1; p = new_place(q, f"t{n_th}", False); register(p)
+            if 'threads' not in p['src']: p['src'].append('threads')
+            p.setdefault('threads', [])
+            if url and url not in p['threads']: p['threads'].append(url)
+            if 'jerry' not in p.setdefault('likedBy', []): p['likedBy'].append('jerry')
+            if not p.get('note') and q.get('note'): p['note'] = q['note']
+            add_comment(p, dict(src='threads', by='@' + post.get('author', 'threads'), url=url, text=q.get('quote', '')))
+
+# ---------- Google Maps 清單（別人推薦的「東京逛」） ----------
+GM_FOOD = [('餐廳', r'拉麵|ラーメン|ramen|カレー|curry|食堂|天助|焼肉|鮨|寿司|うどん|そば|定食|restaurant|kitchen|ダイナー|pizza|burger'),
+           ('咖啡/甜點', r'coffee|cafe|café|カフェ|喫茶|コーヒー|bakery|パン|donut|ドーナツ|tea|甜'),
+           ('Bar/居酒屋', r'bar|バー|居酒屋|酒|club|womb|beer|ビール')]
+n_gm = 0
+gm_p = os.path.join(RAW, 'gm_list.json')
+for q in (json.load(open(gm_p, encoding='utf-8')) if os.path.exists(gm_p) else []):
+    p = find(q['name'], '')
+    if not p and q.get('lat'):
+        near = [x for x in places if x['lat'] and dist_km(x['lat'], x['lng'], q['lat'], q['lng']) < 0.04]
+        p = near[0] if near else None
+    if not p:
+        n_gm += 1
+        t = next((t for t, rx in GM_FOOD if re.search(rx, q['name'], re.I)), '購物')
+        cid = (q.get('cid') or [None, None])[1]
+        p = new_place(dict(name=q['name'].split(' / ')[0], name_en=q['name'], type=t, subcat='選物／古著' if t == '購物' else '', address=q.get('address', ''),
+            lat=q.get('lat'), lng=q.get('lng'), map=f'https://maps.google.com/?cid={cid}' if cid else None), f"g{n_gm}", False)
+        p['approx'] = not q.get('lat'); register(p)
+    if 'gmaps' not in p['src']: p['src'].append('gmaps')
+    if q.get('note'): add_comment(p, dict(src='gmaps', by='東京逛清單', text=q['note']))
+
+# Sheet 的備註也放進評論區最前面
+for p in places:
+    if 'sheet' in p['src'] and p.get('note') and p['note'] not in ('詳影片',):
+        p.setdefault('comments', []).insert(0, dict(src='sheet', by='我們的 Sheet', text=re.sub(r'\s*\n\s*', ' / ', p['note'])[:160]))
+    p['comments'] = p.get('comments', [])[:4]
+print(f'Threads 新增 {n_th}，Google Maps 清單新增 {n_gm}')
 
 # ---------- 補座標 ----------
 todo = [p for p in places if p['lat'] is None]

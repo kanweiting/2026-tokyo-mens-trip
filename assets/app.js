@@ -37,18 +37,36 @@ const ICON = {
 let trip, places, areas, byId;
 const S = { me: localStorage.getItem('me') || '', tab: 'plan', day: null, pos: null, records: [], type: '', favOnly: false, mview: 'list', routeDay: null, sel: null };
 
-/* ---------- 儲存層：localStorage，或 Google Apps Script ---------- */
+/* ---------- 儲存層：localStorage ＋ Google Apps Script（五人同步） ---------- */
+// 後端網址：config.js 的 sheetApi，或用邀請連結 #api=... 存在這支手機（網址就不用寫進公開的 repo）
+const API = {
+  get url() { return CFG.sheetApi || localStorage.getItem('sheetApi') || ''; },
+  set url(v) { v ? localStorage.setItem('sheetApi', v) : localStorage.removeItem('sheetApi'); },
+};
+(() => { const m = location.hash.match(/api=([^&]+)/); if (m) { API.url = decodeURIComponent(m[1]); history.replaceState(null, '', location.pathname + location.search); } })();
 const Store = {
-  key: 'records:v1',
+  key: 'records:v1', qkey: 'pending:v1', last: null, state: '',
+  pending() { return JSON.parse(localStorage.getItem(this.qkey) || '[]'); },
+  setPending(q) { localStorage.setItem(this.qkey, JSON.stringify(q)); },
+  async send(op) {
+    await fetch(API.url, { method: 'POST', body: JSON.stringify(op) }).then(r => r.json()).then(r => { if (!r.ok) throw new Error('not ok'); });
+  },
+  async flush() {
+    let q = this.pending();
+    while (q.length) { try { await this.send(q[0]); } catch (e) { return false; } q = q.slice(1); this.setPending(q); }
+    return true;
+  },
   async load() {
     const local = JSON.parse(localStorage.getItem(this.key) || '[]');
-    if (!CFG.sheetApi) return (S.records = local, '資料只存在這支手機（config.js 未設定 sheetApi）');
+    if (!API.url) { S.records = local; return (this.state = 'local'); }
     try {
-      const r = await fetch(CFG.sheetApi + '?t=' + Date.now()).then(r => r.json());
-      S.records = r.records || [];
-      this.save();
-      return '已和 Google Sheet 同步 · ' + new Date().toLocaleTimeString();
-    } catch (e) { S.records = local; return '⚠️ 連不到 Google Sheet，先用離線資料'; }
+      await this.flush();
+      const r = await fetch(API.url + '?t=' + Date.now()).then(r => r.json());
+      const q = this.pending(), mine = local.filter(x => q.some(o => o.rec?.id === x.id));   // 還沒送出的先保留
+      S.records = (r.records || []).filter(x => !q.some(o => o.id === x.id)).filter(x => !mine.some(m => m.id === x.id)).concat(mine);
+      this.save(); this.last = new Date(); this.state = q.length ? 'pending' : 'ok';
+    } catch (e) { S.records = local; this.state = 'offline'; }
+    return this.state;
   },
   async put(rec) {
     rec.id = rec.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
@@ -58,17 +76,24 @@ const Store = {
     rec.ts = new Date().toISOString(); rec.by = S.me;
     S.records = S.records.filter(r => r.id !== rec.id).concat(rec);
     this.save();
-    if (CFG.sheetApi) fetch(CFG.sheetApi, { method: 'POST', body: JSON.stringify({ op: 'put', rec }) }).catch(() => toast('⚠️ 同步失敗，已存在手機'));
+    if (API.url) { this.setPending(this.pending().concat({ op: 'put', rec })); this.flush().then(ok => { this.state = ok ? 'ok' : 'pending'; renderSync(); }); }
     return rec;
   },
   async del(id) {
     S.records = S.records.filter(r => r.id !== id);
     this.save();
-    if (CFG.sheetApi) fetch(CFG.sheetApi, { method: 'POST', body: JSON.stringify({ op: 'del', id }) }).catch(() => {});
+    if (API.url) { this.setPending(this.pending().concat({ op: 'del', id })); this.flush().then(ok => { this.state = ok ? 'ok' : 'pending'; renderSync(); }); }
   },
   save() { localStorage.setItem(this.key, JSON.stringify(S.records)); },
   of(kind) { return S.records.filter(r => r.kind === kind); },
 };
+function syncText() {
+  const n = Store.pending().length;
+  return { local: '⚪ 只存在這支手機 · 點右上角設定同步', ok: `🟢 五人同步中 · ${Store.last ? Store.last.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : ''} 更新`,
+    pending: `🟡 ${n} 筆等待上傳（網路恢復會自動補傳）`, offline: '🔴 連不到同步伺服器，先用手機裡的資料' }[Store.state] || '';
+}
+function renderSync() { const el = $('#syncState'); if (el) el.textContent = syncText(); }
+async function refresh() { if (!API.url || document.hidden || !$('#sheet').hidden) return; await Store.load(); renderSync(); render(); }
 const Pref = {
   get(k, d) { return JSON.parse(localStorage.getItem(`pref:${S.me}:${k}`) || 'null') ?? d; },
   set(k, v) { localStorage.setItem(`pref:${S.me}:${k}`, JSON.stringify(v)); },
@@ -161,11 +186,23 @@ window.addEventListener('popstate', () => { openSheet.pushed = false; closeSheet
 })();
 
 function pickMe() {
-  openSheet(`<h2>你是哪一位？</h2><div class="sub">收藏、地圖篩選、記帳預設付款人都會跟著你，只存在這支手機。</div>
-    <div class="me-list">${trip.members.map(m => `<button data-me="${m.id}" class="${m.id === S.me ? 'on' : ''}">${av(m.id, 'lg')}${h(m.name)}</button>`).join('')}</div>`,
-    el => el.querySelectorAll('[data-me]').forEach(b => b.onclick = () => {
-      S.me = b.dataset.me; localStorage.setItem('me', S.me); closeSheet(); renderMe(); render(); toast(`嗨 ${memberName(S.me)} 👋`);
-    }));
+  const invite = API.url ? location.origin + location.pathname + '#api=' + encodeURIComponent(API.url) : '';
+  openSheet(`<h2>你是哪一位？</h2><div class="sub">收藏、地圖篩選、記帳預設付款人都會跟著你。</div>
+    <div class="me-list">${trip.members.map(m => `<button data-me="${m.id}" class="${m.id === S.me ? 'on' : ''}">${av(m.id, 'lg')}${h(m.name)}${m.note ? ` <span class="muted small">${h(m.note)}</span>` : ''}</button>`).join('')}</div>
+    <div class="sec-head"><h3>五人同步</h3><span>${h(syncText())}</span></div>
+    ${CFG.sheetApi ? '<div class="sub">同步網址寫在 config.js。</div>' : `
+    <div class="field"><label for="apiUrl">Google Apps Script 網址</label><input class="input" id="apiUrl" placeholder="https://script.google.com/macros/s/.../exec" value="${h(API.url)}"></div>
+    <div class="row2"><button class="btn ghost" data-saveapi>儲存</button><button class="btn ghost" data-invite ${invite ? '' : 'disabled'}>複製邀請連結</button></div>
+    <div class="muted small" style="margin-top:8px">把邀請連結傳到群組，大家點一次就會自動連上同一份帳本。</div>`}`,
+    el => {
+      el.querySelectorAll('[data-me]').forEach(b => b.onclick = () => {
+        S.me = b.dataset.me; localStorage.setItem('me', S.me); closeSheet(); renderMe(); render(); toast(`嗨 ${memberName(S.me)} 👋`);
+      });
+      const sv = el.querySelector('[data-saveapi]');
+      if (sv) sv.onclick = async () => { API.url = el.querySelector('#apiUrl').value.trim(); toast('連線中…'); await Store.load(); renderSync(); render(); toast(syncText()); pickMe(); };
+      const iv = el.querySelector('[data-invite]');
+      if (iv) iv.onclick = async () => { try { await navigator.clipboard.writeText(invite); toast('已複製邀請連結'); } catch (e) { prompt('複製這個連結', invite); } };
+    });
 }
 function renderMe() { $('#meBtn').innerHTML = S.me ? `${av(S.me)}${h(memberName(S.me))}` : '<span class="av ghost">?</span>選擇身分'; }
 
@@ -183,17 +220,22 @@ function openPlace(id) {
       ${cd.length ? `<span class="badge warn">⚠️ ${cd.map(dayLabel).join('、')} 公休</span>` : p.closed ? `<span class="badge">公休：${h(p.closed)}</span>` : ''}
       ${inPlan.map(x => `<span class="badge brand">🗓️ ${h(x)}</span>`).join('')}
       ${who.length ? `<span class="badge">❤️ ${h(who.map(m => m.name).join('、'))} 想去</span>` : ''}
-      ${p.sharedBy?.length ? `<span class="badge">📤 ${h(p.sharedBy.join('、'))} 分享</span>` : ''}
+      ${p.sharedBy?.length ? `<span class="badge">📤 ${h(p.sharedBy.map(memberName).join('、'))} 在 IG 分享</span>` : ''}
+      ${p.likedBy?.length ? `<span class="badge">🧵 ${h(p.likedBy.map(memberName).join('、'))} 在 Threads 按讚</span>` : ''}
+      ${p.src?.includes('gmaps') ? '<span class="badge">🗺️ 東京逛清單</span>' : ''}
     </div>
     <div class="actions">
       <button class="act ${fav ? 'on' : ''}" data-act="fav">${ICON.star}${fav ? '已收藏' : '收藏'}</button>
       <button class="act" data-act="plan">${ICON.plus}加入行程</button>
       <a class="act" href="${h(navUrl(p))}" target="_blank" rel="noopener">${ICON.nav}導航</a>
     </div>
-    ${p.note ? `<div class="note-full">${h(p.note)}</div>` : ''}
+    ${(p.comments || []).length ? `<div class="sec-head" style="margin:16px 0 8px"><h3>大家怎麼說</h3><span>${p.comments.length} 則</span></div>
+      <div class="comments">${p.comments.map(c => `<div class="cmt"><div class="cmt-by">${{ sheet: '📝', ig: '🎬', threads: '🧵', gmaps: '🗺️', google: '⭐' }[c.src] || '💬'} ${h(c.by)}${c.url ? ` · <a href="${h(c.url)}" target="_blank" rel="noopener">原文 ↗</a>` : ''}</div><div class="cmt-t">${h(c.text)}</div></div>`).join('')}</div>`
+      : p.note ? `<div class="note-full">${h(p.note)}</div>` : ''}
     ${p.price ? `<div class="sub">💴 ${h(p.price)}</div>` : ''}
     <div class="linklist">
       <a href="${h(mapsUrl(p))}" target="_blank" rel="noopener"><span>📍 Google Maps</span><span class="muted">↗</span></a>
+      ${(p.threads || []).map((u, i) => `<a href="${h(u)}" target="_blank" rel="noopener"><span>🧵 Threads 貼文 ${i + 1}</span><span class="muted">↗</span></a>`).join('')}
       ${(p.ig || []).map((u, i) => `<a href="${h(u)}" target="_blank" rel="noopener"><span>${ICON.ig.replace('<svg', '<svg style="width:16px;height:16px;vertical-align:-3px"')} IG 介紹 ${i + 1}</span><span class="muted">↗</span></a>`).join('')}
     </div>`,
     el => {
@@ -463,11 +505,21 @@ function renderMoney() {
   if (S.mview === 'list') {
     if (!L0.ex.length) return (body.innerHTML = '<div class="empty">還沒有任何一筆<br><span class="small">按右下角 ＋ 開始記帳</span></div>');
     const groups = {}; L0.ex.forEach(e => (groups[e.at.slice(0, 10)] ||= []).push(e));
-    body.innerHTML = Object.entries(groups).map(([d, es]) => `<div class="day-group"><span>${trip.dates.includes(d) ? `D${dayNo(d)} · ` : ''}${dayLabel(d)}</span><span>¥${fmt(es.reduce((s, e) => s + toBase(+e.amount, e.currency), 0))}</span></div>` +
+    const sub = es => es.reduce((s, e) => s + toBase(+e.amount, e.currency), 0), mySub = es => me ? es.reduce((s, e) => s + (owed(e)[me] || 0), 0) : 0;
+    body.innerHTML = Object.entries(groups).map(([d, es]) => `<div class="day-group"><span>${trip.dates.includes(d) ? `D${dayNo(d)} · ` : ''}${dayLabel(d)} · ${es.length} 筆</span><span>小計 ¥${fmt(sub(es))}${me ? `<small> · 我 ¥${fmt(mySub(es))}</small>` : ''}</span></div>` +
       es.map(e => { const c = CAT[e.cat] || CAT.other, mine = me ? owed(e)[me] || 0 : null;
         return `<button class="exp" data-exp="${e.id}"><div class="icon-tile sm" style="--c:var(--seq)">${c.icon}</div>
           <div class="body"><div class="t">${h(e.title)}</div><div class="s">${e.at.slice(11, 16)} · ${h(memberName(e.payer))} 付 · ${e.people.length === trip.members.length ? '全部人' : e.people.length + ' 人'}${{ ratio: '·比例', amount: '·指定金額' }[e.mode] || ''}</div></div>
-          <div class="amt">${curSym(e.currency)}${fmt(+e.amount)}${mine != null ? `<small class="${mine ? '' : 'muted'}">${mine ? '我 ¥' + fmt(mine) : '與我無關'}</small>` : ''}</div></button>`; }).join('')).join('');
+          <div class="amt">${curSym(e.currency)}${fmt(+e.amount)}${mine != null ? `<small class="${mine ? '' : 'muted'}">${mine ? '我 ¥' + fmt(mine) : '與我無關'}</small>` : ''}</div></button>`; }).join('')).join('') +
+      `<div class="grand"><span>總計 · ${L0.ex.length} 筆</span><b>¥${fmt(L0.total)}</b><small>${twd(L0.total)}${me ? ` · 我 ¥${fmt(L0.share[me])}` : ''}</small></div>`;
+  } else if (S.mview === 'daily') {
+    const days = [...new Set([...trip.dates, ...L0.ex.map(e => e.at.slice(0, 10))])].sort(), ms = trip.members;
+    const cell = (d, id) => L0.ex.filter(e => e.at.slice(0, 10) === d).reduce((s, e) => s + (id ? owed(e)[id] || 0 : toBase(+e.amount, e.currency)), 0);
+    body.innerHTML = `<div class="panel" style="margin-top:0"><div class="panel-head"><h3>每日小計</h3><span class="muted small">每人＝應負擔金額（¥）</span></div>
+      <div class="matrix"><table class="daily"><tr><th>日期</th>${ms.map(m => `<th>${av(m.id)}</th>`).join('')}<th>小計</th></tr>
+      ${days.map(d => `<tr><td>${trip.dates.includes(d) ? `<b>D${dayNo(d)}</b> ` : ''}${md(d)}</td>${ms.map(m => { const v = cell(d, m.id); return `<td class="${v ? '' : 'muted'}">${v ? fmt(v) : '–'}</td>`; }).join('')}<td><b>${fmt(cell(d))}</b></td></tr>`).join('')}
+      <tr class="total"><td>總計</td>${ms.map(m => `<td>${fmt(L0.share[m.id])}</td>`).join('')}<td>${fmt(L0.total)}</td></tr></table></div>
+      <div class="muted small" style="margin-top:8px">總計 ¥${fmt(L0.total)}（${twd(L0.total)}）· 匯率 1 TWD = ${trip.fx.TWD} JPY</div></div>`;
   } else if (S.mview === 'settle') {
     body.innerHTML = `<div class="sec-head"><h3>結清建議</h3><span>最少轉帳次數</span></div>` +
       (L0.tx.length ? L0.tx.map(([a, b, v]) => `<div class="settle">${av(a)}<b>${h(memberName(a))}</b><span class="arrow">${ICON.arrow}</span>${av(b)}<b>${h(memberName(b))}</b>
@@ -596,11 +648,13 @@ async function main() {
   const j = u => fetch(u).then(r => r.json());
   [trip, places, areas] = await Promise.all([j(CFG.tripFile), j(CFG.placesFile), j(CFG.areasFile)]);
   byId = Object.fromEntries(places.map(p => [p.id, p]));
-  document.title = trip.title; $('#appTitle').textContent = trip.title;
+  document.title = trip.title; $('#appTitle').textContent = trip.short || trip.title;
   S.tab = Pref.get('tab', 'plan');
   renderMe(); fillFilters(); bind();
-  $('#syncState').textContent = await Store.load();
+  await Store.load(); renderSync();
   render();
+  setInterval(refresh, 20000);
+  document.addEventListener('visibilitychange', refresh);
   if (!S.me) setTimeout(pickMe, 400);
 }
 main();

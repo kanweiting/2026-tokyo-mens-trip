@@ -313,3 +313,18 @@ main { padding-top: calc(var(--appbar) + var(--safe-t)); padding-bottom: calc(va
 
 #tab-money .wrap { padding-bottom: 84px; }
 @media (min-width: 900px) { .tabbar { justify-content: center; } .tabbar button { flex: 0 0 120px; } }
+/* 評論 */
+.comments { display: grid; gap: 8px; }
+.cmt { background: var(--card-2); border-radius: 12px; padding: 9px 12px; }
+.cmt-by { font-size: 12px; font-weight: 700; color: var(--ink-2); margin-bottom: 2px; }
+.cmt-t { font-size: 14px; line-height: 1.55; }
+/* 記帳總計、每日表 */
+.day-group small { font-weight: 600; color: var(--ink-3); }
+.grand { margin: 14px 0 4px; background: var(--ink); color: var(--card); border-radius: 14px; padding: 12px 14px; display: grid; grid-template-columns: 1fr auto; align-items: center; }
+.grand b { font-size: 20px; } .grand small { grid-column: 1 / -1; opacity: .75; font-size: 12px; }
+.matrix table.daily td, .matrix table.daily th { text-align: right; font-size: 12.5px; padding: 7px 4px; }
+.matrix table.daily td:first-child, .matrix table.daily th:first-child { text-align: left; }
+.matrix table.daily th .av { width: 24px; height: 24px; font-size: 11px; }
+.matrix table.daily tr.total td { font-weight: 800; border-top: 2px solid var(--ink); background: var(--card-2); }
+.matrix table.daily td:last-child { background: var(--brand-soft); }
+.matrix table.daily td, .matrix table.daily th { min-width: 0; padding: 7px 3px; font-size: 12px; }
