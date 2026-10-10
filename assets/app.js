@@ -580,7 +580,7 @@ function renderMoney() {
       (L0.tx.length ? L0.tx.map(([a, b, v]) => `<div class="settle">${av(a)}<b>${h(memberName(a))}</b><span class="arrow">${ICON.arrow}</span>${av(b)}<b>${h(memberName(b))}</b>
         <div class="amt">¥${fmt(v)}<small>${twd(v)}</small></div></div>`).join('') : '<div class="empty">目前不用轉帳 👍</div>') +
       `<div class="sec-head"><h3>每人收支</h3><span>付出 − 應負擔</span></div><div class="panel" style="margin-top:0">` +
-      trip.members.map(m => `<div class="bal">${av(m.id)}<div><b>${h(m.name)}</b><div class="muted small">付 ¥${fmt(L0.paid[m.id])} · 花 ¥${fmt(L0.share[m.id])}${m.until ? ` · 待到 ${md(m.until)}` : ''}</div></div>
+      trip.members.map(m => `<div class="bal">${av(m.id)}<div><b>${h(m.name)}</b><div class="muted small">付 ¥${fmt(L0.paid[m.id])} · 花 ¥${fmt(L0.share[m.id])}</div></div>
         <div class="amt ${L0.bal[m.id] >= 0 ? 'pos' : 'neg'}">${L0.bal[m.id] >= 0 ? '+' : '−'}¥${fmt(Math.abs(L0.bal[m.id]))}</div></div>`).join('') + '</div>';
   } else {
     const byCat = CATS.map(c => ({ c, v: L0.ex.filter(e => e.cat === c.id).reduce((s, e) => s + toBase(+e.amount, e.currency), 0) })).filter(x => x.v).sort((a, b) => b.v - a.v);
