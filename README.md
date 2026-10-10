@@ -42,7 +42,7 @@ git push -u origin main
 ```
 GitHub repo → Settings → Pages → Source: `main` / root。網址會是 `https://<帳號>.github.io/tokyo-mens-trip/`。
 
-本機預覽：`python -m http.server 8000` → 開 http://localhost:8000
+本機預覽：`python -m http.server 8765` → 開 http://localhost:8765（Windows 上 8000 常被 WorkDocs 等程式占用）
 
 ## 複製給下一趟旅行
 1. Fork 這個 repo，改 `data/trip.json`（成員、日期、行程）
