@@ -709,7 +709,7 @@ async function main() {
   [trip, places, areas, sheetPlan] = await Promise.all([j(CFG.tripFile), j(CFG.placesFile), j(CFG.areasFile),
     j(CFG.sheetPlanFile || 'data/sheet_plan.json').catch(() => ({ days: {}, wish: {} }))]);
   byId = Object.fromEntries(places.map(p => [p.id, p]));
-  document.title = trip.title; $('#appTitle').textContent = trip.short || trip.title;
+  document.title = trip.title; $('#appTitle').innerHTML = `<svg class="jp-flag" viewBox="0 0 30 20" aria-label="日本"><rect width="30" height="20" rx="2" fill="#fff"/><circle cx="15" cy="10" r="6" fill="#e60033"/></svg>${h(trip.short || trip.title)}`;
   S.tab = Pref.get('tab', 'plan');
   renderMe(); fillFilters(); bind();
   await Store.load(); renderSync();
