@@ -63,11 +63,13 @@ places = []
 for x in json.load(open(os.path.join(RAW, 'restaurants_raw.json'), encoding='utf-8')):
     name = (x['name'] or '').split('\n')[0].strip() or (x['mapName'] or '').strip()
     if not name or not x['lat']: continue           # 超商、整理清單等沒有地點的列不收
-    votes = len(re.findall(r'[EＥ芃]', x['vote'] or ''))   # Sheet 投票欄：E／芃 = 芃（eddie）
+    vt = x['vote'] or ''
+    voters = (['eddie'] if re.search(r'[EＥ]', vt) else []) + (['aron'] if '芃' in vt else [])   # Sheet 投票欄：E＝Eddie（煊）、芃＝Aron
+    votes = len(voters)
     places.append(dict(id=f"s{int(float(x['id']))}", name=name, name_en=(x['mapName'] or '').strip(),
         type=sheet_type(x['cat']), subcat=(x['cat'] or '').replace('\n', ' '), closed=x['closed'] if x['closed'] not in ('-', None) else '',
         note=(x['note'] or '').strip(), price='', lat=x['lat'], lng=x['lng'], approx=False, map=x['mapUrl'],
-        ig=x['ig'], votes=votes, voters=['eddie'] if votes else [], src=['sheet'], sharedBy=[], rating=None, ratingCount=None))
+        ig=x['ig'], votes=votes, voters=voters, src=['sheet'], sharedBy=[], rating=None, ratingCount=None))
 
 # ---------- IG ----------
 idx = {}
@@ -83,7 +85,7 @@ def find(n1, n2):
     return None
 
 # IG 顯示名稱 → trip.json 成員 id（網站上顯示的名字以 trip.json 為準）
-NICK = {'Jerry Kan': 'jerry', 'Aron Lin': 'aron', 'Chung Kai Yu': 'kaiyu', '盅舖師': 'wei'}
+NICK = {'Jerry Kan': 'jerry', 'Aron Lin': 'aron', 'Chung Kai Yu': 'kaiyu', '盅舖師': 'kaiyu'}   # 盅舖師＝Kaiyu 的企業帳號；偉不在 IG 群組
 SHORT = lambda s: NICK.get(s, 'eddie' if 'Eddie' in s or '𝑬𝒅𝒅𝒊𝒆' in s else s)
 def excerpt(cap, names):
     """從貼文文案切出跟這個地點有關的一段（約 120 字），當作「評論」顯示"""
