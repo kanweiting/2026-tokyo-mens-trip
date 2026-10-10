@@ -402,7 +402,8 @@ function renderMap() {
   const hide = new Set(Pref.get('hideTypes', [])), fo = Pref.get('favOnly', false);
   const cnt = t => places.filter(p => p.type === t && p.lat).length;
   $('#mapChips').innerHTML = `<button class="chip ${fo ? 'on' : ''}" data-favonly>★ 收藏</button>` + TYPES.filter(t => cnt(t.name)).map(t =>
-    `<button class="chip ${hide.has(t.name) ? 'off' : ''}" data-hide="${t.name}"><i class="sw" style="background:var(${t.v})"></i>${t.icon} ${t.name}<span class="n">${cnt(t.name)}</span></button>`).join('');
+    `<button class="chip ${hide.has(t.name) ? 'hidden-type' : 'on'}" data-hide="${t.name}" aria-pressed="${!hide.has(t.name)}"><i class="sw" style="background:var(${t.v})"></i>${t.icon} ${t.name}<span class="n">${cnt(t.name)}</span></button>`).join('')
+    + (hide.size ? '<button class="chip" data-showall>↺ 全部顯示</button>' : '');
   cluster.clearLayers(); routeLayer.clearLayers(); markers = {};
   if (S.routeDay) return renderRoute();
   $('#routePill').hidden = true;
@@ -678,10 +679,11 @@ function bind() {
   $('#addExpBtn').onclick = () => openExpense();
   $('#moneySeg').onclick = e => { const b = e.target.closest('[data-mview]'); if (b) { S.mview = b.dataset.mview; renderMoney(); } };
   document.addEventListener('click', async e => {
-    const t = e.target.closest('[data-fav],[data-day],[data-hide],[data-favonly],[data-type],[data-route],[data-clear-route],[data-exp],[data-pedit-tl],[data-open],[data-area]');
+    const t = e.target.closest('[data-fav],[data-day],[data-hide],[data-showall],[data-favonly],[data-type],[data-route],[data-clear-route],[data-exp],[data-pedit-tl],[data-open],[data-area]');
     if (!t || t.closest('#sheet')) return;
     if (t.dataset.fav) { e.stopPropagation(); return toggleFav(t.dataset.fav); }
     if (t.dataset.day) { S.day = t.dataset.day; return renderPlan(); }
+    if ('showall' in t.dataset) { Pref.set('hideTypes', []); return renderMap(); }
     if (t.dataset.hide) { const s = new Set(Pref.get('hideTypes', [])); s.has(t.dataset.hide) ? s.delete(t.dataset.hide) : s.add(t.dataset.hide); Pref.set('hideTypes', [...s]); return renderMap(); }
     if ('favonly' in t.dataset) { Pref.set('favOnly', !Pref.get('favOnly', false)); return renderMap(); }
     if ('type' in t.dataset && t.classList.contains('chip')) { S.type = t.dataset.type; return renderList(); }
