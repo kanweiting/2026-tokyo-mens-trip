@@ -138,8 +138,39 @@ function dayItems(d) {
   const base = (trip.days[d] || []).map((it, i) => ({ ...it, date: d, _k: `t:${d}:${i}` })).filter(it => !hidden.has(it._k));
   const added = Store.of('plan').filter(r => r.date === d).map(r => ({ ...r, _k: r.id, mine: true }));
   let last = '00:00';
-  return [...base, ...added].map((it, i) => { const k = it.time || last; last = k; return { it, k, i }; })
+  const byTime = [...base, ...added].map((it, i) => { const k = it.time || last; last = k; return { it, k, i }; })
     .sort((a, b) => a.k.localeCompare(b.k) || a.i - b.i).map(x => x.it);
+  const ord = Store.of('order').find(r => r.date === d)?.keys;      // 拖拉後的順序
+  if (!ord) return byTime;
+  const out = ord.map(k => byTime.find(i => i._k === k)).filter(Boolean);
+  byTime.forEach((it, i) => { if (out.includes(it)) return;            // 新加的：放在原本時間序的前一個項目後面
+    const prev = byTime.slice(0, i).reverse().find(x => out.includes(x)); out.splice(prev ? out.indexOf(prev) + 1 : 0, 0, it); });
+  return out;
+}
+const toMin = t => t ? +t.slice(0, 2) * 60 + +t.slice(3, 5) : null;
+const toHM = m => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+async function setItemTime(it, time) {   // 回傳新的 key（內建項目會變成自己的一筆）
+  const keep = ['id', 'place', 'date', 'slot', 'note', 'title', 'createdAt', 'createdBy', 'fromTrip'];
+  const rec = Object.fromEntries(keep.filter(k => it[k] != null).map(k => [k, it[k]]));
+  if (!it.mine) { await Store.put({ kind: 'planHide', key: it._k }); delete rec.id; rec.fromTrip = true; }
+  const r = await Store.put({ ...rec, kind: 'plan', time });
+  return r.id;
+}
+async function onReorder(d, keys, movedKey) {
+  const items = dayItems(d), get = k => items.find(i => i._k === k);
+  const at = keys.indexOf(movedKey), it = get(movedKey);
+  const prevT = keys.slice(0, at).reverse().map(get).find(i => i?.time)?.time, nextT = keys.slice(at + 1).map(get).find(i => i?.time)?.time;
+  let msg = '已調整順序';
+  if (it?.time && ((prevT && it.time < prevT) || (nextT && it.time > nextT))) {
+    const p = toMin(prevT), n = toMin(nextT);
+    let t = p != null ? p + 60 : n - 60;
+    if (n != null && t >= n) t = p != null ? Math.round((p + n) / 2) : n - 30;
+    const hm = toHM(Math.max(0, t)), nk = await setItemTime(it, hm);
+    keys = keys.map(k => k === movedKey ? nk : k);
+    msg = `已調整順序，時間改成 ${hm}`;
+  }
+  await Store.put({ id: 'order-' + d, kind: 'order', date: d, keys });
+  toast(msg); renderPlan();
 }
 const planEntries = id => trip.dates.flatMap(d => dayItems(d).filter(i => i.place === id));
 const findItem = k => trip.dates.flatMap(dayItems).find(i => i._k === k);
@@ -270,7 +301,7 @@ function openAddPlan(id, rec) {
       el.querySelector('[data-save]').onclick = async () => {
         F.time = el.querySelector('#ptime').value;
         if (rec && !rec.mine) await Store.put({ kind: 'planHide', key: rec._k });   // 內建項目：藏起原本的、另存一筆
-        const base = rec?.mine ? { id: rec.id, createdAt: rec.createdAt, createdBy: rec.createdBy } : {};
+        const base = rec?.mine ? { id: rec.id, createdAt: rec.createdAt, createdBy: rec.createdBy, fromTrip: rec.fromTrip } : rec ? { fromTrip: true } : {};
         await Store.put({ ...base, kind: 'plan', place: id, date: F.date, time: F.time, slot: F.slot, note: rec?.note || '' });
         closeSheet(); S.day = F.date; toast(`已排進 D${dayNo(F.date)}`); render();
       };
@@ -302,22 +333,31 @@ function renderPlan() {
       n++;
       const t = typeOf(p), cd = closedDays(p).includes(S.day);
       if (prev && p.lat) { const tr = travel(prev, p); rows.push(`<li class="tl-item"><div></div><div class="tl-gap">${tr.icon}${tr.text}</div></li>`); }
-      rows.push(`<li class="tl-item"><div class="tl-dot" style="--c:var(${t.v})">${n}</div><div>
+      rows.push(`<li class="tl-item drag" data-k="${h(it._k)}"><div class="tl-dot" style="--c:var(${t.v})">${n}</div><div>
         <div class="tl-card" data-open="${p.id}" role="button" tabindex="0">
           <span class="tl-more" data-pedit-tl="${h(it._k)}" role="button" aria-label="調整或移除">⋯</span>
+          <span class="tl-grip" aria-label="按住拖拉調整順序"><svg viewBox="0 0 24 24"><path d="M5 9h14M5 15h14"/></svg></span>
           <div class="tl-time">${h(it.time || '')}${it.time ? ' · ' : ''}${h(it.slot || '')}</div>
           <h4>${t.icon} ${h(p.name)}</h4>
-          <div class="meta"><span>${h(p.subcat || p.type)}</span><span>${h(p.area)}</span>${it.mine ? `<span>由 ${h(memberName(it.createdBy))} 加入</span>` : ''}</div>
+          <div class="meta"><span>${h(p.subcat || p.type)}</span><span>${h(p.area)}</span>${it.mine && !it.fromTrip ? `<span>由 ${h(memberName(it.createdBy))} 加入</span>` : ''}</div>
           <div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${it.note ? `<span class="badge warn">📝 ${h(it.note)}</span>` : ''}${cd ? '<span class="badge warn">⚠️ 今天公休</span>' : ''}</div>
         </div></div></li>`);
       if (p.lat) prev = p;
     } else {
       const ic = /抵達|起飛|JX|航/.test((it.title || '') + it.slot) ? '✈️' : it.slot === '退房' ? '🧳' : '📌';
-      rows.push(`<li class="tl-item"><div class="tl-dot sys">${ic}</div><div><div class="tl-card sys">
+      rows.push(`<li class="tl-item" data-k="${h(it._k)}"><div class="tl-dot sys">${ic}</div><div><div class="tl-card sys">
         <div class="tl-time">${h(it.time || '')}${it.time ? ' · ' : ''}${h(it.slot || '')}</div><b>${h(it.title || '')}</b>${it.note ? `<div class="muted small">${h(it.note)}</div>` : ''}</div></div></li>`);
     }
   }
   $('#timeline').innerHTML = rows.join('') || '<div class="empty">這天還沒排行程<br><span class="small">到「探索」點地點 →「加入行程」</span></div>';
+  if (window.Sortable && stops.length > 1) {
+    renderPlan.sort?.destroy();
+    renderPlan.sort = Sortable.create($('#timeline'), { draggable: '.tl-item.drag', handle: '.tl-grip', animation: 160,
+      ghostClass: 'tl-ghost', chosenClass: 'tl-chosen', forceFallback: true, fallbackTolerance: 4,
+      onStart: () => $('#timeline').classList.add('dragging'),
+      onEnd: e => { $('#timeline').classList.remove('dragging'); if (e.oldIndex === e.newIndex) return;
+        onReorder(S.day, [...$('#timeline').querySelectorAll('li[data-k]')].map(li => li.dataset.k), e.item.dataset.k); } });
+  }
   const planned = plannedIds();
   const favs = S.me ? [...favsOf(S.me)].filter(id => byId[id] && !planned.has(id)).map(id => byId[id]) : [];
   $('#favCount').textContent = S.me ? `${favs.length} 個還沒排` : '';
