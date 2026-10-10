@@ -134,11 +134,17 @@ async function toggleFav(id) {
 
 /* ---------- 行程資料：trip.json + 自己加的 ---------- */
 function dayItems(d) {
-  const base = (trip.days[d] || []).map((it, i) => ({ ...it, _k: 't' + i }));
+  const hidden = new Set(Store.of('planHide').map(r => r.key));   // trip.json 內建的行程被移除／改過
+  const base = (trip.days[d] || []).map((it, i) => ({ ...it, date: d, _k: `t:${d}:${i}` })).filter(it => !hidden.has(it._k));
   const added = Store.of('plan').filter(r => r.date === d).map(r => ({ ...r, _k: r.id, mine: true }));
   let last = '00:00';
   return [...base, ...added].map((it, i) => { const k = it.time || last; last = k; return { it, k, i }; })
     .sort((a, b) => a.k.localeCompare(b.k) || a.i - b.i).map(x => x.it);
+}
+const planEntries = id => trip.dates.flatMap(d => dayItems(d).filter(i => i.place === id));
+const findItem = k => trip.dates.flatMap(dayItems).find(i => i._k === k);
+async function removeItem(it) {
+  if (it.mine) await Store.del(it.id); else await Store.put({ kind: 'planHide', key: it._k });
 }
 const plannedIds = () => new Set(trip.dates.flatMap(d => dayItems(d).map(i => i.place)).filter(Boolean));
 
@@ -210,7 +216,8 @@ function openPlace(id) {
   const p = byId[id]; if (!p) return;
   const t = typeOf(p), cd = closedDays(p), fav = isFav(id);
   const who = trip.members.filter(m => favsOf(m.id).has(id));
-  const inPlan = trip.dates.flatMap(d => dayItems(d).filter(i => i.place === id).map(i => `D${dayNo(d)} ${md(d)}${i.time ? ' ' + i.time : ''}`));
+  const entries = planEntries(id);
+  const label = i => `D${dayNo(i.date)} ${dayLabel(i.date)}${i.time ? ' ' + i.time : ''}${i.slot ? ' · ' + i.slot : ''}`;
   const d = S.pos && p.lat ? dist(S.pos[0], S.pos[1], p.lat, p.lng) : null;
   openSheet(`
     <div class="sheet-title"><div class="icon-tile" style="--c:var(${t.v})">${t.icon}</div>
@@ -218,7 +225,6 @@ function openPlace(id) {
     ${p.name_en && p.name_en !== p.name ? `<div class="sub" style="margin-top:6px">${h(p.name_en)}</div>` : ''}
     <div class="tags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
       ${cd.length ? `<span class="badge warn">⚠️ ${cd.map(dayLabel).join('、')} 公休</span>` : p.closed ? `<span class="badge">公休：${h(p.closed)}</span>` : ''}
-      ${inPlan.map(x => `<span class="badge brand">🗓️ ${h(x)}</span>`).join('')}
       ${who.length ? `<span class="badge">❤️ ${h(who.map(m => m.name).join('、'))} 想去</span>` : ''}
       ${p.sharedBy?.length ? `<span class="badge">📤 ${h(p.sharedBy.map(memberName).join('、'))} 在 IG 分享</span>` : ''}
       ${p.likedBy?.length ? `<span class="badge">🧵 ${h(p.likedBy.map(memberName).join('、'))} 在 Threads 按讚</span>` : ''}
@@ -226,9 +232,12 @@ function openPlace(id) {
     </div>
     <div class="actions">
       <button class="act ${fav ? 'on' : ''}" data-act="fav">${ICON.star}${fav ? '已收藏' : '收藏'}</button>
-      <button class="act" data-act="plan">${ICON.plus}加入行程</button>
+      <button class="act ${entries.length ? 'on' : ''}" data-act="plan">${entries.length ? '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>已在行程' : ICON.plus + '加入行程'}</button>
       <a class="act" href="${h(navUrl(p))}" target="_blank" rel="noopener">${ICON.nav}導航</a>
     </div>
+    ${entries.length ? `<div class="plan-box"><div class="plan-box-h">🗓️ 已排入行程</div>
+      ${entries.map(i => `<div class="plan-row"><span>${h(label(i))}</span><button class="mini" data-pedit="${h(i._k)}">調整</button><button class="mini danger" data-prm="${h(i._k)}">移除</button></div>`).join('')}
+      <button class="mini ghost" data-act="plan-more">＋ 也排到其他天</button></div>` : ''}
     ${(p.comments || []).length ? `<div class="sec-head" style="margin:16px 0 8px"><h3>大家怎麼說</h3><span>${p.comments.length} 則</span></div>
       <div class="comments">${p.comments.map(c => `<div class="cmt"><div class="cmt-by">${{ sheet: '📝', ig: '🎬', threads: '🧵', gmaps: '🗺️', google: '⭐' }[c.src] || '💬'} ${h(c.by)}${c.url ? ` · <a href="${h(c.url)}" target="_blank" rel="noopener">原文 ↗</a>` : ''}</div><div class="cmt-t">${h(c.text)}</div></div>`).join('')}</div>`
       : p.note ? `<div class="note-full">${h(p.note)}</div>` : ''}
@@ -240,7 +249,10 @@ function openPlace(id) {
     </div>`,
     el => {
       el.querySelector('[data-act=fav]').onclick = async () => { await toggleFav(id); openPlace(id); };
-      el.querySelector('[data-act=plan]').onclick = () => openAddPlan(id);
+      el.querySelector('[data-act=plan]').onclick = () => entries.length ? openAddPlan(id, entries[0]) : openAddPlan(id);
+      const more = el.querySelector('[data-act=plan-more]'); if (more) more.onclick = () => openAddPlan(id);
+      el.querySelectorAll('[data-pedit]').forEach(b => b.onclick = () => openAddPlan(id, findItem(b.dataset.pedit)));
+      el.querySelectorAll('[data-prm]').forEach(b => b.onclick = async () => { const it = findItem(b.dataset.prm); await removeItem(it); toast(`已從 D${dayNo(it.date)} 移除`); render(); openPlace(id); });
     });
 }
 
@@ -257,10 +269,12 @@ function openAddPlan(id, rec) {
       el.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { F.slot = b.dataset.s; F.time = el.querySelector('#ptime').value; draw(); });
       el.querySelector('[data-save]').onclick = async () => {
         F.time = el.querySelector('#ptime').value;
-        await Store.put({ ...(rec || {}), kind: 'plan', place: id, date: F.date, time: F.time, slot: F.slot });
+        if (rec && !rec.mine) await Store.put({ kind: 'planHide', key: rec._k });   // 內建項目：藏起原本的、另存一筆
+        const base = rec?.mine ? { id: rec.id, createdAt: rec.createdAt, createdBy: rec.createdBy } : {};
+        await Store.put({ ...base, kind: 'plan', place: id, date: F.date, time: F.time, slot: F.slot, note: rec?.note || '' });
         closeSheet(); S.day = F.date; toast(`已排進 D${dayNo(F.date)}`); render();
       };
-      const del = el.querySelector('[data-del]'); if (del) del.onclick = async () => { await Store.del(rec.id); closeSheet(); toast('已移除'); render(); };
+      const del = el.querySelector('[data-del]'); if (del) del.onclick = async () => { await removeItem(rec); closeSheet(); toast(`已從 D${dayNo(rec.date)} 移除`); render(); };
     });
   draw();
 }
@@ -289,12 +303,13 @@ function renderPlan() {
       const t = typeOf(p), cd = closedDays(p).includes(S.day);
       if (prev && p.lat) { const tr = travel(prev, p); rows.push(`<li class="tl-item"><div></div><div class="tl-gap">${tr.icon}${tr.text}</div></li>`); }
       rows.push(`<li class="tl-item"><div class="tl-dot" style="--c:var(${t.v})">${n}</div><div>
-        <button class="tl-card" data-open="${p.id}" ${it.mine ? `data-edit-plan="${it.id}"` : ''}>
+        <div class="tl-card" data-open="${p.id}" role="button" tabindex="0">
+          <span class="tl-more" data-pedit-tl="${h(it._k)}" role="button" aria-label="調整或移除">⋯</span>
           <div class="tl-time">${h(it.time || '')}${it.time ? ' · ' : ''}${h(it.slot || '')}</div>
           <h4>${t.icon} ${h(p.name)}</h4>
           <div class="meta"><span>${h(p.subcat || p.type)}</span><span>${h(p.area)}</span>${it.mine ? `<span>由 ${h(memberName(it.createdBy))} 加入</span>` : ''}</div>
           <div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${it.note ? `<span class="badge warn">📝 ${h(it.note)}</span>` : ''}${cd ? '<span class="badge warn">⚠️ 今天公休</span>' : ''}</div>
-        </button></div></li>`);
+        </div></div></li>`);
       if (p.lat) prev = p;
     } else {
       const ic = /抵達|起飛|JX|航/.test((it.title || '') + it.slot) ? '✈️' : it.slot === '退房' ? '🧳' : '📌';
@@ -622,7 +637,7 @@ function bind() {
   $('#addExpBtn').onclick = () => openExpense();
   $('#moneySeg').onclick = e => { const b = e.target.closest('[data-mview]'); if (b) { S.mview = b.dataset.mview; renderMoney(); } };
   document.addEventListener('click', async e => {
-    const t = e.target.closest('[data-fav],[data-day],[data-hide],[data-favonly],[data-type],[data-route],[data-clear-route],[data-exp],[data-edit-plan],[data-open],[data-area]');
+    const t = e.target.closest('[data-fav],[data-day],[data-hide],[data-favonly],[data-type],[data-route],[data-clear-route],[data-exp],[data-pedit-tl],[data-open],[data-area]');
     if (!t || t.closest('#sheet')) return;
     if (t.dataset.fav) { e.stopPropagation(); return toggleFav(t.dataset.fav); }
     if (t.dataset.day) { S.day = t.dataset.day; return renderPlan(); }
@@ -632,7 +647,7 @@ function bind() {
     if (t.dataset.route) { S.routeDay = t.dataset.route; return go('map'); }
     if ('clearRoute' in t.dataset) { S.routeDay = null; return renderMap(); }
     if (t.dataset.exp) return openExpense(t.dataset.exp);
-    if (t.dataset.editPlan) { const r = Store.of('plan').find(x => x.id === t.dataset.editPlan); return openPlace(r.place); }
+    if (t.dataset.peditTl) { const it = findItem(t.dataset.peditTl); return openAddPlan(it.place, it); }
     if (t.dataset.open) { if (S.tab === 'map' && t.closest('#carousel') && S.sel !== t.dataset.open) return selectPlace(t.dataset.open, { scroll: true }); return openPlace(t.dataset.open); }
     if (t.dataset.area) { $('#fArea').value = t.dataset.area; S.type = t.dataset.type || ''; go('list'); }
   });

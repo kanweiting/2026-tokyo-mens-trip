@@ -328,3 +328,15 @@ main { padding-top: calc(var(--appbar) + var(--safe-t)); padding-bottom: calc(va
 .matrix table.daily tr.total td { font-weight: 800; border-top: 2px solid var(--ink); background: var(--card-2); }
 .matrix table.daily td:last-child { background: var(--brand-soft); }
 .matrix table.daily td, .matrix table.daily th { min-width: 0; padding: 7px 3px; font-size: 12px; }
+/* 已排入行程 */
+.plan-box { background: var(--brand-soft); border-radius: 14px; padding: 10px 12px; margin: 4px 0 8px; }
+.plan-box-h { font-size: 12.5px; font-weight: 800; color: var(--brand); margin-bottom: 4px; }
+.plan-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--brand) 15%, transparent); font-size: 14px; font-weight: 600; }
+.plan-row span { flex: 1; }
+.mini { border: 0; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 700; background: var(--card); color: var(--ink); min-height: 32px; }
+.mini.danger { color: var(--neg); }
+.mini.ghost { background: none; color: var(--brand); padding-left: 0; margin-top: 6px; }
+.tl-card { position: relative; cursor: pointer; }
+.tl-more { position: absolute; top: 6px; right: 6px; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 20px; font-weight: 800; color: var(--ink-3); line-height: 1; }
+.tl-more:active, .tl-more:hover { background: var(--card-2); color: var(--ink); }
+.tl-card h4 { margin-right: 30px; }
