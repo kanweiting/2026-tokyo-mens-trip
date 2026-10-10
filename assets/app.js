@@ -108,6 +108,7 @@ const dayNo = d => trip.dates.indexOf(d) + 1;
 const nowLocal = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 const today = () => nowLocal().slice(0, 10);
 const memberIdx = id => trip.members.findIndex(m => m.id === id);
+const enName = id => { const m = trip.members.find(x => x.id === id); return m?.en || m?.name || id; };
 const memberName = id => trip.members.find(m => m.id === id)?.name || id;
 const av = (id, cls = '') => { const i = memberIdx(id); return `<span class="av ${cls}" style="--c:var(--m${(i % 5) + 1})">${h((memberName(id) || '?').slice(0, 1).toUpperCase())}</span>`; };
 const mapsUrl = p => p.map || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((p.name_en || p.name) + ' Tokyo')}`;
@@ -225,7 +226,7 @@ window.addEventListener('popstate', () => { openSheet.pushed = false; closeSheet
 function pickMe() {
   const invite = API.url ? location.origin + location.pathname + '#api=' + encodeURIComponent(API.url) : '';
   openSheet(`<h2>你是哪一位？</h2><div class="sub">收藏、地圖篩選、記帳預設付款人都會跟著你。</div>
-    <div class="me-list">${trip.members.map(m => `<button data-me="${m.id}" class="${m.id === S.me ? 'on' : ''}">${av(m.id, 'lg')}${h(m.name)}${m.note ? ` <span class="muted small">${h(m.note)}</span>` : ''}</button>`).join('')}</div>
+    <div class="me-list">${trip.members.map(m => `<button data-me="${m.id}" class="${m.id === S.me ? 'on' : ''}">${av(m.id, 'lg')}${h(m.en || m.name)}</button>`).join('')}</div>
     <div class="sec-head"><h3>五人同步</h3><span>${h(syncText())}</span></div>
     ${CFG.sheetApi ? '<div class="sub">同步網址寫在 config.js。</div>' : `
     <div class="field"><label for="apiUrl">Google Apps Script 網址</label><input class="input" id="apiUrl" placeholder="https://script.google.com/macros/s/.../exec" value="${h(API.url)}"></div>
@@ -233,7 +234,7 @@ function pickMe() {
     <div class="muted small" style="margin-top:8px">把邀請連結傳到群組，大家點一次就會自動連上同一份帳本。</div>`}`,
     el => {
       el.querySelectorAll('[data-me]').forEach(b => b.onclick = () => {
-        S.me = b.dataset.me; localStorage.setItem('me', S.me); closeSheet(); renderMe(); render(); toast(`嗨 ${memberName(S.me)} 👋`);
+        S.me = b.dataset.me; localStorage.setItem('me', S.me); closeSheet(); renderMe(); render(); toast(`Hi ${enName(S.me)} 👋`);
       });
       const sv = el.querySelector('[data-saveapi]');
       if (sv) sv.onclick = async () => { API.url = el.querySelector('#apiUrl').value.trim(); toast('連線中…'); await Store.load(); renderSync(); render(); toast(syncText()); pickMe(); };
@@ -241,7 +242,7 @@ function pickMe() {
       if (iv) iv.onclick = async () => { try { await navigator.clipboard.writeText(invite); toast('已複製邀請連結'); } catch (e) { prompt('複製這個連結', invite); } };
     });
 }
-function renderMe() { $('#meBtn').innerHTML = S.me ? `${av(S.me)}${h(memberName(S.me))}` : '<span class="av ghost">?</span>選擇身分'; }
+function renderMe() { $('#meBtn').innerHTML = S.me ? `${av(S.me)}${h(enName(S.me))}` : '<span class="av ghost">?</span>選擇身分'; }
 
 function openPlace(id) {
   const p = byId[id]; if (!p) return;

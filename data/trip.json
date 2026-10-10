@@ -15,24 +15,29 @@
   "members": [
     {
       "id": "jerry",
-      "name": "甘"
+      "name": "甘",
+      "en": "Jerry"
     },
     {
       "id": "eddie",
-      "name": "煊"
+      "name": "煊",
+      "en": "Eddie"
     },
     {
       "id": "aron",
-      "name": "芃"
+      "name": "芃",
+      "en": "Aron"
     },
     {
       "id": "kaiyu",
-      "name": "凱"
+      "name": "凱",
+      "en": "Kaiyu"
     },
     {
       "id": "wei",
       "name": "偉",
-      "until": "2026-10-19"
+      "until": "2026-10-19",
+      "en": "Yuwei"
     }
   ],
   "flights": [
