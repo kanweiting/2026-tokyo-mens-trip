@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b7f78"/><stop offset="1" stop-color="#0f4f8f"/></linearGradient>
+    <linearGradient id="tw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#f1f3f5"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- 日之丸 -->
+  <circle cx="256" cy="236" r="158" fill="#e60033"/>
+  <!-- 東京鐵塔 -->
+  <g fill="url(#tw)">
+    <rect x="251" y="44" width="10" height="82" rx="3"/>
+    <polygon points="245,124 267,124 292,204 220,204"/>
+    <polygon points="226,222 286,222 330,326 182,326"/>
+    <polygon points="186,350 326,350 404,474 334,474 256,398 178,474 108,474"/>
+  </g>
+  <g fill="#ff6a13">
+    <rect x="208" y="200" width="96" height="24" rx="5"/>
+    <rect x="164" y="322" width="184" height="30" rx="6"/>
+    <rect x="214" y="270" width="84" height="12" rx="3"/>
+    <rect x="236" y="160" width="40" height="9" rx="2"/>
+  </g>
+  <g stroke="#e60033" stroke-width="5" stroke-linecap="round" opacity=".55">
+    <path d="M232 238 L276 310 M280 238 L236 310"/>
+    <path d="M206 366 L246 420 M306 366 L266 420"/>
+  </g>
+</svg>
