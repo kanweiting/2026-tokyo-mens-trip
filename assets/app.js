@@ -338,7 +338,7 @@ function openPlace(id) {
       ${who.length ? `<span class="badge">❤️ ${h(who.map(m => m.name).join('、'))} 想去</span>` : ''}
       ${p.sharedBy?.length ? `<span class="badge">📤 ${h(p.sharedBy.map(memberName).join('、'))} 在 IG 分享</span>` : ''}
       ${p.likedBy?.length ? `<span class="badge">🧵 ${h(p.likedBy.map(memberName).join('、'))} 在 Threads 按讚</span>` : ''}
-      ${p.src?.includes('gmaps') ? '<span class="badge">🗺️ 東京逛清單</span>' : ''}
+      ${(p.lists || (p.src?.includes('gmaps') ? ['東京逛清單'] : [])).map(l => `<span class="badge">🗺️ ${h(l)}</span>`).join('')}
       ${p.addedBy ? `<span class="badge brand">➕ ${h(memberName(p.addedBy))} 從 Google 加入</span>` : ''}
     </div>
     <div class="actions">
