@@ -357,3 +357,9 @@ main { padding-top: calc(var(--appbar) + var(--safe-t)); padding-bottom: calc(va
 .map-top .chip.hidden-type .n { text-decoration: line-through; }
 .appbar-title { display: flex; align-items: center; gap: 8px; }
 .jp-flag { width: 27px; height: 18px; flex: none; border-radius: 3px; box-shadow: 0 0 0 1px rgba(0,0,0,.14); }
+.pin { position: relative; }
+.pin-star { position: absolute; top: -7px; right: -7px; transform: rotate(45deg); width: 17px; height: 17px; border-radius: 50%; background: #f5a300; color: #fff; font-size: 11px; display: grid; place-items: center; border: 1.5px solid #fff; line-height: 1; }
+
+.gsearch { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; text-align: left; width: 100%; border: 1.5px dashed var(--brand); background: var(--brand-soft); color: var(--ink); border-radius: var(--r); padding: 12px 14px; }
+.gsearch .gs-ic { font-size: 22px; }
+.gsearch small { display: block; color: var(--ink-2); font-size: 12px; margin-top: 2px; }

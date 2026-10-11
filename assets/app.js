@@ -34,7 +34,7 @@ const ICON = {
   arrow: '<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
 };
 
-let trip, places, areas, byId, sheetPlan = { days: {}, wish: {} };
+let trip, places, basePlaces, areas, byId, sheetPlan = { days: {}, wish: {} };
 const S = { me: localStorage.getItem('me') || '', tab: 'plan', day: null, pos: null, records: [], type: '', favOnly: false, mview: 'list', routeDay: null, sel: null };
 
 /* ---------- 儲存層：localStorage ＋ Google Apps Script（五人同步） ---------- */
@@ -43,7 +43,11 @@ const API = {
   get url() { return CFG.sheetApi || localStorage.getItem('sheetApi') || ''; },
   set url(v) { v ? localStorage.setItem('sheetApi', v) : localStorage.removeItem('sheetApi'); },
 };
-(() => { const m = location.hash.match(/api=([^&]+)/); if (m) { API.url = decodeURIComponent(m[1]); history.replaceState(null, '', location.pathname + location.search); } })();
+// 網址保留 #api=…：iPhone「加入主畫面」會用當下網址，主畫面版才會跟 Safari 版連到同一份帳本
+(() => { const m = location.hash.match(/api=([^&]+)/); if (m) API.url = decodeURIComponent(m[1]);
+  else if (API.url) history.replaceState(null, '', location.pathname + location.search + '#api=' + encodeURIComponent(API.url)); })();
+window.addEventListener('hashchange', () => { const m = location.hash.match(/api=([^&]+)/); if (m && decodeURIComponent(m[1]) !== API.url) { API.url = decodeURIComponent(m[1]); location.reload(); } });
+const parseApi = v => { v = (v || '').trim(); const m = v.match(/api=([^&\s]+)/); return m ? decodeURIComponent(m[1]) : v; };
 const Store = {
   key: 'records:v1', qkey: 'pending:v1', last: null, state: '',
   pending() { return JSON.parse(localStorage.getItem(this.qkey) || '[]'); },
@@ -62,9 +66,16 @@ const Store = {
     try {
       await this.flush();
       const r = await fetch(API.url + '?t=' + Date.now()).then(r => r.json());
-      const q = this.pending(), mine = local.filter(x => q.some(o => o.rec?.id === x.id));   // 還沒送出的先保留
-      S.records = (r.records || []).filter(x => !q.some(o => o.id === x.id)).filter(x => !mine.some(m => m.id === x.id)).concat(mine);
+      const server = r.records || [], sids = new Set(server.map(x => x.id));
+      const synced = new Set(JSON.parse(localStorage.getItem('synced:v1') || '[]'));
+      // 這支手機在還沒連上同步前存的資料（例如主畫面版的收藏）→ 補傳上去，不要丟掉
+      const localOnly = local.filter(x => !sids.has(x.id) && !synced.has(x.id) && !this.pending().some(o => o.rec?.id === x.id));
+      if (localOnly.length) { this.setPending(this.pending().concat(localOnly.map(rec => ({ op: 'put', rec })))); await this.flush(); }
+      const q = this.pending(), mine = local.filter(x => q.some(o => o.rec?.id === x.id) || localOnly.includes(x));   // 還沒送出的先保留
+      S.records = server.filter(x => !q.some(o => o.id === x.id)).filter(x => !mine.some(m => m.id === x.id)).concat(mine);
+      localStorage.setItem('synced:v1', JSON.stringify([...sids, ...localOnly.map(x => x.id)]));
       this.save(); this.last = new Date(); this.state = q.length ? 'pending' : 'ok';
+      if (localOnly.length) setTimeout(() => toast(`已把這支手機上的 ${localOnly.length} 筆資料同步上去`), 600);
     } catch (e) { S.records = local; this.state = 'offline'; }
     return this.state;
   },
@@ -93,7 +104,7 @@ function syncText() {
     pending: `🟡 ${n} 筆等待上傳（網路恢復會自動補傳）`, offline: '🔴 連不到同步伺服器，先用手機裡的資料' }[Store.state] || '';
 }
 function renderSync() { const el = $('#syncState'); if (el) el.textContent = syncText(); }
-async function refresh() { if (!API.url || document.hidden || !$('#sheet').hidden) return; await Store.load(); renderSync(); render(); }
+async function refresh() { if (!API.url || document.hidden || !$('#sheet').hidden) return; await Store.load(); renderSync(); mergeUserPlaces(); render(); }
 const Pref = {
   get(k, d) { return JSON.parse(localStorage.getItem(`pref:${S.me}:${k}`) || 'null') ?? d; },
   set(k, v) { localStorage.setItem(`pref:${S.me}:${k}`, JSON.stringify(v)); },
@@ -121,6 +132,56 @@ function travel(a, b) { // 直線距離估算交通時間（僅供參考）
   const d = dist(a.lat, a.lng, b.lat, b.lng) * 1.3;
   return d < 1.2 ? { icon: ICON.walk, text: `步行約 ${Math.max(3, Math.round(d / 4.5 * 60))} 分 · ${kmText(d)}` }
     : { icon: ICON.train, text: `電車約 ${Math.round(12 + d * 2.2)} 分（估）· ${kmText(d)}` };
+}
+
+/* ---------- 大家從 Google 地圖加進來的地點（kind: 'place'，五人同步） ---------- */
+function mergeUserPlaces() {
+  const mine = Store.of('place').map(r => ({ comments: [], ig: [], sharedBy: [], ...r.data, id: 'u_' + r.id, recId: r.id, src: ['user'], addedBy: r.createdBy }));
+  places = basePlaces.concat(mine);
+  byId = Object.fromEntries(places.map(p => [p.id, p]));
+}
+const areaFor = (lat, lng) => { const { area, km } = nearestArea(lat, lng); return km <= 2.5 ? area.name : km < 30 ? '東京其他' : '東京以外'; };
+async function openGoogleSearch(q) {
+  if (!API.url) return toast('要先連上五人同步才能搜尋 Google（右上角頭像設定）');
+  const isUrl = /^https?:\/\//.test(q);
+  openSheet(`<h2>${isUrl ? '從 Google Maps 連結加入' : '在 Google 地圖搜尋'}</h2><div class="sub">${h(q)}</div><div class="empty" style="margin-top:12px">搜尋中…</div>`);
+  let res = [];
+  try { res = (await fetch(`${API.url}?op=${isUrl ? 'resolve&url' : 'search&q'}=${encodeURIComponent(q)}`).then(r => r.json())).results; }
+  catch (e) { res = null; }
+  if (!Array.isArray(res)) return openSheet(`<h2>搜尋功能還沒啟用</h2><div class="sub">請甘到 Apps Script 貼上新版程式碼並「部署 → 管理部署作業 → 新版本」。</div>`);
+  const nk = v => String(v || '').toLowerCase().replace(/[\s\W_]+/g, '');
+  const same = (a, b) => { a = nk(a); b = nk(b); return a.length >= 2 && b.length >= 2 && (a.includes(b) || b.includes(a)); };
+  const near = r => places.find(p => p.lat && dist(p.lat, p.lng, r.lat, r.lng) < 0.15 && (same(p.name, r.name) || same(p.name_en, r.name)));
+  openSheet(`<h2>Google 地圖結果</h2><div class="sub">「${h(q)}」· 點一個加進我們的清單</div>
+    <div class="grid" style="margin-top:12px">${res.map((r, i) => { const dup = near(r);
+      return `<button class="pcard" data-gr="${i}"><div class="icon-tile" style="--c:var(--t6)">📍</div><div class="body"><h4>${h(r.name || q)}</h4>
+        <div class="meta"><span>${h(r.address || '')}</span><span>· ${h(areaFor(r.lat, r.lng))}</span></div>
+        ${dup ? `<div class="tags"><span class="badge brand">清單裡已有：${h(dup.name)}</span></div>` : ''}</div></button>`; }).join('')
+      || '<div class="empty">Google 找不到。可以換個寫法（加分店名、用日文或英文），或直接貼 Google Maps 的分享連結</div>'}</div>`,
+    el => el.querySelectorAll('[data-gr]').forEach(b => b.onclick = () => { const r = res[+b.dataset.gr], dup = near(r);
+      if (dup && confirm(`清單裡已經有「${dup.name}」，要直接打開它嗎？\n（按「取消」仍然新增一筆）`)) return openPlace(dup.id);
+      openAddUserPlace(r, q); }));
+}
+function openAddUserPlace(r, q) {
+  const F = { name: r.name || q, type: '餐廳', subcat: '', note: '' };
+  const draw = () => openSheet(`<h2>加進我們的清單</h2><div class="sub">${h(r.address || '')}${r.address ? ' · ' : ''}${h(areaFor(r.lat, r.lng))}</div>
+    <div class="field"><label for="upName">名稱</label><input class="input" id="upName" value="${h(F.name)}"></div>
+    <div class="field"><span class="field-label">類別</span><div class="cat-grid">${TYPES.map(t => `<button class="cat-btn ${F.type === t.name ? 'on' : ''}" data-ut="${t.name}"><i>${t.icon}</i>${t.name}</button>`).join('')}</div></div>
+    <div class="field"><label for="upSub">細分（選填）</label><input class="input" id="upSub" placeholder="例：拉麵、古著、神社" value="${h(F.subcat)}"></div>
+    <div class="field"><label for="upNote">為什麼想去（選填）</label><input class="input" id="upNote" placeholder="例：朋友推薦的醬油拉麵" value="${h(F.note)}"></div>
+    <div class="form-foot"><button class="btn" data-save>加入清單</button></div>`, el => {
+      const keep = () => { F.name = el.querySelector('#upName').value; F.subcat = el.querySelector('#upSub').value; F.note = el.querySelector('#upNote').value; };
+      el.querySelectorAll('[data-ut]').forEach(b => b.onclick = () => { keep(); F.type = b.dataset.ut; draw(); });
+      el.querySelector('[data-save]').onclick = async () => {
+        keep(); if (!F.name.trim()) return toast('請輸入名稱');
+        const note = F.note.trim();
+        const rec = await Store.put({ kind: 'place', data: { name: F.name.trim(), name_en: '', type: F.type, subcat: F.subcat.trim(), note, address: r.address || '',
+          lat: r.lat, lng: r.lng, approx: false, map: r.map || '', area: areaFor(r.lat, r.lng), closed: '',
+          comments: note ? [{ src: 'user', by: memberName(S.me), text: note }] : [] } });
+        mergeUserPlaces(); toast('已加進清單，五個人都看得到'); render(); openPlace('u_' + rec.id);
+      };
+    });
+  draw();
 }
 
 /* ---------- 收藏 ---------- */
@@ -231,7 +292,7 @@ function pickMe() {
     <div class="me-list">${trip.members.map(m => `<button data-me="${m.id}" class="${m.id === S.me ? 'on' : ''}">${av(m.id, 'lg')}${h(m.en || m.name)}</button>`).join('')}</div>
     <div class="sec-head"><h3>五人同步</h3><span>${h(syncText())}</span></div>
     ${CFG.sheetApi ? '<div class="sub">同步網址寫在 config.js。</div>' : `
-    <div class="field"><label for="apiUrl">Google Apps Script 網址</label><input class="input" id="apiUrl" placeholder="https://script.google.com/macros/s/.../exec" value="${h(API.url)}"></div>
+    <div class="field"><label for="apiUrl">貼上邀請連結（或 Apps Script 網址）</label><input class="input" id="apiUrl" placeholder="https://kanweiting.github.io/...#api=..." value="${h(API.url)}"></div>
     <div class="row2"><button class="btn ghost" data-saveapi>儲存</button><button class="btn ghost" data-invite ${invite ? '' : 'disabled'}>複製邀請連結</button></div>
     <div class="muted small" style="margin-top:8px">把邀請連結傳到群組，大家點一次就會自動連上同一份帳本。</div>`}`,
     el => {
@@ -239,7 +300,8 @@ function pickMe() {
         S.me = b.dataset.me; localStorage.setItem('me', S.me); closeSheet(); renderMe(); render(); toast(`Hi ${enName(S.me)} 👋`);
       });
       const sv = el.querySelector('[data-saveapi]');
-      if (sv) sv.onclick = async () => { API.url = el.querySelector('#apiUrl').value.trim(); toast('連線中…'); await Store.load(); renderSync(); render(); toast(syncText()); pickMe(); };
+      if (sv) sv.onclick = async () => { API.url = parseApi(el.querySelector('#apiUrl').value);
+        history.replaceState(null, '', location.pathname + location.search + (API.url ? '#api=' + encodeURIComponent(API.url) : '')); toast('連線中…'); await Store.load(); renderSync(); render(); toast(syncText()); pickMe(); };
       const iv = el.querySelector('[data-invite]');
       if (iv) iv.onclick = async () => { try { await navigator.clipboard.writeText(invite); toast('已複製邀請連結'); } catch (e) { prompt('複製這個連結', invite); } };
     });
@@ -263,6 +325,7 @@ function openPlace(id) {
       ${p.sharedBy?.length ? `<span class="badge">📤 ${h(p.sharedBy.map(memberName).join('、'))} 在 IG 分享</span>` : ''}
       ${p.likedBy?.length ? `<span class="badge">🧵 ${h(p.likedBy.map(memberName).join('、'))} 在 Threads 按讚</span>` : ''}
       ${p.src?.includes('gmaps') ? '<span class="badge">🗺️ 東京逛清單</span>' : ''}
+      ${p.addedBy ? `<span class="badge brand">➕ ${h(memberName(p.addedBy))} 從 Google 加入</span>` : ''}
     </div>
     <div class="actions">
       <button class="act ${fav ? 'on' : ''}" data-act="fav">${ICON.star}${fav ? '已收藏' : '收藏'}</button>
@@ -280,9 +343,12 @@ function openPlace(id) {
       <a href="${h(mapsUrl(p))}" target="_blank" rel="noopener"><span>📍 Google Maps</span><span class="muted">↗</span></a>
       ${(p.threads || []).map((u, i) => `<a href="${h(u)}" target="_blank" rel="noopener"><span>🧵 Threads 貼文 ${i + 1}</span><span class="muted">↗</span></a>`).join('')}
       ${(p.ig || []).map((u, i) => `<a href="${h(u)}" target="_blank" rel="noopener"><span>${ICON.ig.replace('<svg', '<svg style="width:16px;height:16px;vertical-align:-3px"')} IG 介紹 ${i + 1}</span><span class="muted">↗</span></a>`).join('')}
-    </div>`,
+    </div>
+    ${p.recId ? '<button class="btn danger" data-act="rmplace" style="margin-top:10px">從清單移除這個地點</button>' : ''}`,
     el => {
       el.querySelector('[data-act=fav]').onclick = async () => { await toggleFav(id); openPlace(id); };
+      const rm = el.querySelector('[data-act=rmplace]');
+      if (rm) rm.onclick = async () => { if (!confirm(`把「${p.name}」從清單移除？`)) return; await Store.del(p.recId); mergeUserPlaces(); closeSheet(); toast('已移除'); render(); };
       el.querySelector('[data-act=plan]').onclick = () => entries.length ? openAddPlan(id, entries[0]) : openAddPlan(id);
       const more = el.querySelector('[data-act=plan-more]'); if (more) more.onclick = () => openAddPlan(id);
       el.querySelectorAll('[data-pedit]').forEach(b => b.onclick = () => openAddPlan(id, findItem(b.dataset.pedit)));
@@ -371,7 +437,7 @@ function renderPlan() {
 /* ---------- 地圖 ---------- */
 let map, cluster, routeLayer, meMarker, markers = {}, ignoreMove = false;
 const pinIcon = (p, sel) => { const t = typeOf(p); return L.divIcon({ className: '', iconSize: sel ? [40, 40] : [30, 30], iconAnchor: sel ? [20, 40] : [15, 30],
-  html: `<div class="pin ${p.approx ? 'approx' : ''} ${sel ? 'sel' : ''}" style="--c:${css(t.v)}"><span>${t.icon}</span></div>` }); };
+  html: `<div class="pin ${p.approx ? 'approx' : ''} ${sel ? 'sel' : ''}" style="--c:${css(t.v)}"><span>${t.icon}</span>${isFav(p.id) ? '<b class="pin-star">★</b>' : ''}</div>` }); };
 function initMap() {
   map = L.map('map', { zoomControl: false, attributionControl: true }).setView([35.676, 139.72], 13);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 }).addTo(map);
@@ -395,23 +461,28 @@ function initMap() {
   }, 140); }, { passive: true });
 }
 function visiblePlaces() {
-  const hide = new Set(Pref.get('hideTypes', [])), mine = favsOf(S.me), fo = Pref.get('favOnly', false);
-  return places.filter(p => p.lat && !hide.has(p.type) && (!fo || mine.has(p.id)));
+  const hide = new Set(Pref.get('hideTypes', [])), mine = favsOf(S.me), favLayer = Pref.get('favLayer', false);
+  return places.filter(p => p.lat && (!hide.has(p.type) || (favLayer && mine.has(p.id))));
 }
 function renderMap() {
   if (!map) initMap();
   setTimeout(() => map.invalidateSize(), 0);
-  const hide = new Set(Pref.get('hideTypes', [])), fo = Pref.get('favOnly', false);
+  const hide = new Set(Pref.get('hideTypes', []));
   const cnt = t => places.filter(p => p.type === t && p.lat).length;
-  $('#mapChips').innerHTML = `<button class="chip ${fo ? 'on' : ''}" data-favonly>★ 收藏</button>` + TYPES.filter(t => cnt(t.name)).map(t =>
-    `<button class="chip ${hide.has(t.name) ? 'hidden-type' : 'on'}" data-hide="${t.name}" aria-pressed="${!hide.has(t.name)}"><i class="sw" style="background:var(${t.v})"></i>${t.icon} ${t.name}<span class="n">${cnt(t.name)}</span></button>`).join('')
-    + (hide.size ? '<button class="chip" data-showall>↺ 全部顯示</button>' : '');
+  const fl = Pref.get('favLayer', false), types = TYPES.filter(t => cnt(t.name));
+  $('#mapChips').innerHTML = `<button class="chip ${fl ? 'on' : 'hidden-type'}" data-favlayer aria-pressed="${fl}">★ 收藏<span class="n">${S.me ? favsOf(S.me).size : 0}</span></button>`
+    + (hide.size < types.length ? '<button class="chip" data-hideall>✕ 全部關閉</button>' : '<button class="chip" data-showall>↺ 全部顯示</button>')
+    + types.map(t => `<button class="chip ${hide.has(t.name) ? 'hidden-type' : 'on'}" data-hide="${t.name}" aria-pressed="${!hide.has(t.name)}"><i class="sw" style="background:var(${t.v})"></i>${t.icon} ${t.name}<span class="n">${cnt(t.name)}</span></button>`).join('');
   cluster.clearLayers(); routeLayer.clearLayers(); markers = {};
   if (S.routeDay) return renderRoute();
   $('#routePill').hidden = true;
   for (const p of visiblePlaces()) {
     markers[p.id] = L.marker([p.lat, p.lng], { icon: pinIcon(p, p.id === S.sel), title: p.name }).on('click', () => selectPlace(p.id, { scroll: true }));
     cluster.addLayer(markers[p.id]);
+  }
+  if (S.fitNext) {   // 剛切換篩選：點不多時把地圖縮放到全部看得到
+    S.fitNext = false; const v = visiblePlaces();
+    if (v.length && v.length <= 60) { ignoreMove = true; map.fitBounds(v.map(p => [p.lat, p.lng]), { padding: [70, 70], maxZoom: 15 }); }
   }
   renderCarousel(); renderAreaPill();
 }
@@ -435,6 +506,8 @@ function renderCarousel() {
   if (!map || S.routeDay) return;
   const b = map.getBounds(), c = map.getCenter();
   let list = visiblePlaces().filter(p => b.contains([p.lat, p.lng])).sort((x, y) => dist(c.lat, c.lng, x.lat, x.lng) - dist(c.lat, c.lng, y.lat, y.lng)).slice(0, 25);
+  const vis = new Set(visiblePlaces().map(p => p.id));
+  if (S.sel && !vis.has(S.sel)) S.sel = null;                         // 被篩掉的就不要再留在卡片列
   if (S.sel && byId[S.sel] && !list.some(p => p.id === S.sel)) list.unshift(byId[S.sel]);
   if (S.sel) list.sort((x, y) => (y.id === S.sel) - (x.id === S.sel));
   $('#carousel').innerHTML = list.map(p => pcard(p, { compact: true, active: p.id === S.sel })).join('');
@@ -444,7 +517,7 @@ function selectPlace(id, { pan = true, scroll = true } = {}) {
   const prev = S.sel; S.sel = id; const p = byId[id];
   if (prev && markers[prev]) markers[prev].setIcon(pinIcon(byId[prev], false));
   if (markers[id]) markers[id].setIcon(pinIcon(p, true));
-  if (pan && p.lat) { ignoreMove = true; if (markers[id] && cluster.zoomToShowLayer && !map.hasLayer(markers[id])) cluster.zoomToShowLayer(markers[id]); else map.panTo([p.lat, p.lng]); }
+  if (pan && p.lat) { ignoreMove = true; map.setView([p.lat, p.lng], Math.max(map.getZoom(), 16)); }   // 16 以上不分群，點一定看得到
   const car = $('#carousel'), card = car.querySelector(`[data-open="${id}"]`);
   car.querySelectorAll('.pcard').forEach(c => c.classList.toggle('active', c.dataset.open === id));
   if (scroll) { if (card) card.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' }); else { renderCarousel(); } }
@@ -493,7 +566,9 @@ function renderList() {
   const key = { votes: p => -pop(p), name: p => p.name, dist: p => S.pos && p.lat ? dist(...S.pos, p.lat, p.lng) : 1e9 }[fs];
   const L2 = base.filter(p => !S.type || p.type === S.type).sort((a, b) => { const x = key(a), y = key(b); return x < y ? -1 : x > y ? 1 : 0; });
   $('#listCount').textContent = `${L2.length} 個地點${fs === 'dist' && !S.pos ? ' · 還沒定位（到地圖按 ◎）' : ''}`;
-  $('#list').innerHTML = L2.slice(0, 150).map(p => pcard(p)).join('') || '<div class="empty">沒有符合的地點</div>';
+  const raw = $('#q').value.trim(), isUrl = /^https?:\/\//.test(raw);
+  const g = raw ? `<button class="gsearch" data-gsearch><span class="gs-ic">🔎</span><span><b>${isUrl ? '用這個 Google Maps 連結新增地點' : `在 Google 地圖搜尋「${h(raw)}」`}</b><small>清單裡沒有？找到後可以加進來，五個人都看得到</small></span></button>` : '';
+  $('#list').innerHTML = ((isUrl ? '' : L2.slice(0, 150).map(p => pcard(p)).join('')) + g) || '<div class="empty">沒有符合的地點</div>';
 }
 
 /* ---------- 統計 ---------- */
@@ -681,17 +756,19 @@ function bind() {
   $('#addExpBtn').onclick = () => openExpense();
   $('#moneySeg').onclick = e => { const b = e.target.closest('[data-mview]'); if (b) { S.mview = b.dataset.mview; renderMoney(); } };
   document.addEventListener('click', async e => {
-    const t = e.target.closest('[data-fav],[data-day],[data-hide],[data-showall],[data-favonly],[data-type],[data-route],[data-clear-route],[data-exp],[data-pedit-tl],[data-open],[data-area]');
+    const t = e.target.closest('[data-fav],[data-day],[data-hide],[data-showall],[data-hideall],[data-favlayer],[data-type],[data-route],[data-clear-route],[data-exp],[data-pedit-tl],[data-gsearch],[data-open],[data-area]');
     if (!t || t.closest('#sheet')) return;
     if (t.dataset.fav) { e.stopPropagation(); return toggleFav(t.dataset.fav); }
     if (t.dataset.day) { S.day = t.dataset.day; return renderPlan(); }
     if ('showall' in t.dataset) { Pref.set('hideTypes', []); return renderMap(); }
-    if (t.dataset.hide) { const s = new Set(Pref.get('hideTypes', [])); s.has(t.dataset.hide) ? s.delete(t.dataset.hide) : s.add(t.dataset.hide); Pref.set('hideTypes', [...s]); return renderMap(); }
-    if ('favonly' in t.dataset) { Pref.set('favOnly', !Pref.get('favOnly', false)); return renderMap(); }
+    if (t.dataset.hide) { S.fitNext = true; const s = new Set(Pref.get('hideTypes', [])); s.has(t.dataset.hide) ? s.delete(t.dataset.hide) : s.add(t.dataset.hide); Pref.set('hideTypes', [...s]); return renderMap(); }
+    if ('favlayer' in t.dataset) { if (!S.me) return pickMe(); Pref.set('favLayer', !Pref.get('favLayer', false)); S.fitNext = true; return renderMap(); }
+    if ('hideall' in t.dataset) { Pref.set('hideTypes', TYPES.map(x => x.name)); return renderMap(); }
     if ('type' in t.dataset && t.classList.contains('chip')) { S.type = t.dataset.type; return renderList(); }
     if (t.dataset.route) { S.routeDay = t.dataset.route; return go('map'); }
     if ('clearRoute' in t.dataset) { S.routeDay = null; return renderMap(); }
     if (t.dataset.exp) return openExpense(t.dataset.exp);
+    if ('gsearch' in t.dataset) return openGoogleSearch($('#q').value.trim());
     if (t.dataset.peditTl) { const it = findItem(t.dataset.peditTl); return openAddPlan(it.place, it); }
     if (t.dataset.open) { if (S.tab === 'map' && t.closest('#carousel') && S.sel !== t.dataset.open) return selectPlace(t.dataset.open, { scroll: true }); return openPlace(t.dataset.open); }
     if (t.dataset.area) { $('#fArea').value = t.dataset.area; S.type = t.dataset.type || ''; go('list'); }
@@ -706,17 +783,18 @@ function bind() {
 }
 async function main() {
   const j = u => fetch(u).then(r => r.json());
-  [trip, places, areas, sheetPlan] = await Promise.all([j(CFG.tripFile), j(CFG.placesFile), j(CFG.areasFile),
+  [trip, basePlaces, areas, sheetPlan] = await Promise.all([j(CFG.tripFile), j(CFG.placesFile), j(CFG.areasFile),
     j(CFG.sheetPlanFile || 'data/sheet_plan.json').catch(() => ({ days: {}, wish: {} }))]);
-  byId = Object.fromEntries(places.map(p => [p.id, p]));
+  mergeUserPlaces();
   document.title = trip.title; $('#appTitle').innerHTML = `<svg class="jp-flag" viewBox="0 0 30 20" aria-label="日本"><rect width="30" height="20" rx="2" fill="#fff"/><circle cx="15" cy="10" r="6" fill="#e60033"/></svg>${h(trip.short || trip.title)}`;
   S.tab = Pref.get('tab', 'plan');
   renderMe(); fillFilters(); bind();
-  await Store.load(); renderSync();
+  await Store.load(); renderSync(); mergeUserPlaces();
   render();
   setInterval(refresh, 20000);
   document.addEventListener('visibilitychange', refresh);
   if (!S.me) setTimeout(pickMe, 400);
 }
+window.TT = { visiblePlaces: () => visiblePlaces().length, favs: () => [...favsOf(S.me)] };   // 除錯用
 main();
 })();
