@@ -140,6 +140,16 @@ function mergeUserPlaces() {
   places = basePlaces.concat(mine);
   byId = Object.fromEntries(places.map(p => [p.id, p]));
 }
+// Google 的地點類型 → 中文標籤、我們的類別
+const GT_LABEL = { clothing_store: '服飾店', shoe_store: '鞋店', jewelry_store: '飾品店', store: '商店', shopping_mall: '購物中心', department_store: '百貨公司',
+  book_store: '書店', home_goods_store: '家居用品', restaurant: '餐廳', food: '餐飲', meal_takeaway: '外帶', cafe: '咖啡廳', bakery: '麵包店', bar: '酒吧',
+  night_club: '夜店', tourist_attraction: '景點', park: '公園', museum: '博物館', art_gallery: '藝廊', place_of_worship: '寺社', lodging: '住宿',
+  train_station: '車站', subway_station: '地鐵站', point_of_interest: '地點' };
+const gLabel = r => r.typeLabel || (r.types || []).map(t => GT_LABEL[t]).find(Boolean) || '';
+const gType = r => { const t = (r.types || []).join(' ') + ' ' + (r.typeLabel || '');
+  return /bar|night_club|pub|izakaya|酒/.test(t) ? 'Bar/居酒屋' : /cafe|coffee|bakery|dessert|tea|confectioner|ice_cream|咖啡|甜/.test(t) ? '咖啡/甜點'
+    : /restaurant|food|meal|ramen|sushi|餐/.test(t) ? '餐廳' : /store|shop|mall|market|店/.test(t) ? '購物'
+    : /tourist|park|museum|gallery|worship|shrine|temple|景/.test(t) ? '景點' : '其他'; };
 const areaFor = (lat, lng) => { const { area, km } = nearestArea(lat, lng); return km <= 2.5 ? area.name : km < 30 ? '東京其他' : '東京以外'; };
 async function openGoogleSearch(q) {
   if (!API.url) return toast('要先連上五人同步才能搜尋 Google（右上角頭像設定）');
@@ -152,18 +162,22 @@ async function openGoogleSearch(q) {
   const nk = v => String(v || '').toLowerCase().replace(/[\s\W_]+/g, '');
   const same = (a, b) => { a = nk(a); b = nk(b); return a.length >= 2 && b.length >= 2 && (a.includes(b) || b.includes(a)); };
   const near = r => places.find(p => p.lat && dist(p.lat, p.lng, r.lat, r.lng) < 0.15 && (same(p.name, r.name) || same(p.name_en, r.name)));
-  openSheet(`<h2>Google 地圖結果</h2><div class="sub">「${h(q)}」· 點一個加進我們的清單</div>
+  const exact = res.some(r => r.exact);
+  openSheet(`<h2>Google 地圖結果</h2><div class="sub">「${h(q)}」· 點一個加進我們的清單${exact ? '' : '<br>名稱先用你輸入的字，加入前可以改'}</div>
     <div class="grid" style="margin-top:12px">${res.map((r, i) => { const dup = near(r);
-      return `<button class="pcard" data-gr="${i}"><div class="icon-tile" style="--c:var(--t6)">📍</div><div class="body"><h4>${h(r.name || q)}</h4>
-        <div class="meta"><span>${h(r.address || '')}</span><span>· ${h(areaFor(r.lat, r.lng))}</span></div>
-        ${dup ? `<div class="tags"><span class="badge brand">清單裡已有：${h(dup.name)}</span></div>` : ''}</div></button>`; }).join('')
+      const t = TYPE[gType(r)] || TYPE['其他'], lb = gLabel(r), ok = r.exact || r.isPlace;
+      return `<button class="pcard" data-gr="${i}"><div class="icon-tile" style="--c:var(${t.v})">${t.icon}</div><div class="body"><h4>${h(r.name || q)}</h4>
+        <div class="tags" style="margin:2px 0 4px">${ok ? `<span class="badge brand">✓ Google 找到${lb ? '：' + h(lb) : ''}</span>` : '<span class="badge warn">只找到地址附近，可能不是這家</span>'}
+          ${r.rating ? `<span class="badge">⭐ ${r.rating}（${fmt(r.ratingCount || 0)}）</span>` : ''}</div>
+        <div class="meta"><span>${h(areaFor(r.lat, r.lng))}</span><span>· ${h((r.address || '').replace(/^日本[〒\d-]*\s*/, ''))}</span></div>
+        ${dup ? `<div class="tags"><span class="badge">清單裡已有：${h(dup.name)}</span></div>` : ''}</div></button>`; }).join('')
       || '<div class="empty">Google 找不到。可以換個寫法（加分店名、用日文或英文），或直接貼 Google Maps 的分享連結</div>'}</div>`,
     el => el.querySelectorAll('[data-gr]').forEach(b => b.onclick = () => { const r = res[+b.dataset.gr], dup = near(r);
       if (dup && confirm(`清單裡已經有「${dup.name}」，要直接打開它嗎？\n（按「取消」仍然新增一筆）`)) return openPlace(dup.id);
       openAddUserPlace(r, q); }));
 }
 function openAddUserPlace(r, q) {
-  const F = { name: r.name || q, type: '餐廳', subcat: '', note: '' };
+  const F = { name: r.name || q, type: gType(r), subcat: gLabel(r) === '地點' ? '' : gLabel(r), note: '' };
   const draw = () => openSheet(`<h2>加進我們的清單</h2><div class="sub">${h(r.address || '')}${r.address ? ' · ' : ''}${h(areaFor(r.lat, r.lng))}</div>
     <div class="field"><label for="upName">名稱</label><input class="input" id="upName" value="${h(F.name)}"></div>
     <div class="field"><span class="field-label">類別</span><div class="cat-grid">${TYPES.map(t => `<button class="cat-btn ${F.type === t.name ? 'on' : ''}" data-ut="${t.name}"><i>${t.icon}</i>${t.name}</button>`).join('')}</div></div>
@@ -176,7 +190,7 @@ function openAddUserPlace(r, q) {
         keep(); if (!F.name.trim()) return toast('請輸入名稱');
         const note = F.note.trim();
         const rec = await Store.put({ kind: 'place', data: { name: F.name.trim(), name_en: '', type: F.type, subcat: F.subcat.trim(), note, address: r.address || '',
-          lat: r.lat, lng: r.lng, approx: false, map: r.map || '', area: areaFor(r.lat, r.lng), closed: '',
+          lat: r.lat, lng: r.lng, approx: false, map: r.map || '', area: areaFor(r.lat, r.lng), closed: '', rating: r.rating || null, ratingCount: r.ratingCount || null,
           comments: note ? [{ src: 'user', by: memberName(S.me), text: note }] : [] } });
         mergeUserPlaces(); toast('已加進清單，五個人都看得到'); render(); openPlace('u_' + rec.id);
       };

@@ -32,25 +32,45 @@ function doPost(e) {
   } finally { lock.releaseLock(); }
 }
 
-// 用 Google 地圖找地點（Apps Script 內建的 Maps 服務，不用 API key）
+// 找地點：有設定 PLACES_KEY（專案設定 → 指令碼屬性）就用 Google Places，拿得到真正的店名和評分；
+// 沒有就用 Apps Script 內建的地理編碼（免費，但只有地址，店名用使用者輸入的字）
 function search_(q) {
   q = String(q).trim();
   if (!q) return [];
-  const g = Maps.newGeocoder().setRegion('jp').setLanguage('zh-TW')
-    .setBounds(35.5, 139.4, 35.9, 140.0);   // 偏好東京一帶
+  const key = PropertiesService.getScriptProperties().getProperty('PLACES_KEY');
+  return key ? places_(q, key) : geocode_(q);
+}
+
+function places_(q, key) {
+  const r = UrlFetchApp.fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.primaryTypeDisplayName,places.googleMapsUri,places.rating,places.userRatingCount' },
+    payload: JSON.stringify({ textQuery: q, languageCode: 'zh-TW', regionCode: 'JP', maxResultCount: 6,
+      locationBias: { rectangle: { low: { latitude: 35.5, longitude: 139.4 }, high: { latitude: 35.9, longitude: 140.0 } } } })
+  });
+  const body = JSON.parse(r.getContentText() || '{}');
+  if (!body.places) return geocode_(q);
+  return body.places.map(function (p) {
+    return { name: p.displayName && p.displayName.text, address: p.formattedAddress, lat: p.location.latitude, lng: p.location.longitude,
+      placeId: p.id, types: p.types || [], typeLabel: p.primaryTypeDisplayName && p.primaryTypeDisplayName.text,
+      rating: p.rating || null, ratingCount: p.userRatingCount || null, map: p.googleMapsUri, exact: true };
+  });
+}
+
+function geocode_(q) {
+  const g = Maps.newGeocoder().setRegion('jp').setLanguage('zh-TW').setBounds(35.5, 139.4, 35.9, 140.0);
   const seen = {}, out = [];
   [q, q + ' 東京'].forEach(function (s) {
-    const r = g.geocode(s);
-    (r.results || []).forEach(function (x) {
+    (g.geocode(s).results || []).forEach(function (x) {
       if (seen[x.place_id] || out.length >= 6) return;
       seen[x.place_id] = 1;
-      const poi = (x.address_components || []).filter(function (c) {
-        return c.types.some(function (t) { return ['point_of_interest', 'establishment', 'premise', 'park', 'tourist_attraction'].indexOf(t) >= 0; });
-      })[0];
-      out.push({ name: poi ? poi.long_name : q, address: x.formatted_address, lat: x.geometry.location.lat, lng: x.geometry.location.lng,
-        placeId: x.place_id, types: x.types, map: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(poi ? poi.long_name : q) + '&query_place_id=' + x.place_id });
+      const isPlace = x.types.some(function (t) { return ['establishment', 'point_of_interest'].indexOf(t) >= 0; });
+      out.push({ name: q, address: x.formatted_address, lat: x.geometry.location.lat, lng: x.geometry.location.lng, placeId: x.place_id,
+        types: x.types, exact: false, isPlace: isPlace,
+        map: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q) + '&query_place_id=' + x.place_id });
     });
   });
+  out.sort(function (a, b) { return b.isPlace - a.isPlace; });
   return out;
 }
 
