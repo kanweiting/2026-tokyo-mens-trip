@@ -45,7 +45,7 @@ const API = {
 };
 // 網址保留 #api=…：iPhone「加入主畫面」會用當下網址，主畫面版才會跟 Safari 版連到同一份帳本
 (() => { const m = location.hash.match(/api=([^&]+)/); if (m) API.url = decodeURIComponent(m[1]);
-  else if (API.url) history.replaceState(null, '', location.pathname + location.search + '#api=' + encodeURIComponent(API.url)); })();
+  else if (API.url && !CFG.sheetApi) history.replaceState(null, '', location.pathname + location.search + '#api=' + encodeURIComponent(API.url)); })();
 window.addEventListener('hashchange', () => { const m = location.hash.match(/api=([^&]+)/); if (m && decodeURIComponent(m[1]) !== API.url) { API.url = decodeURIComponent(m[1]); location.reload(); } });
 const parseApi = v => { v = (v || '').trim(); const m = v.match(/api=([^&\s]+)/); return m ? decodeURIComponent(m[1]) : v; };
 const Store = {
@@ -305,7 +305,7 @@ function pickMe() {
   openSheet(`<h2>你是哪一位？</h2><div class="sub">收藏、地圖篩選、記帳預設付款人都會跟著你。</div>
     <div class="me-list">${trip.members.map(m => `<button data-me="${m.id}" class="${m.id === S.me ? 'on' : ''}">${av(m.id, 'lg')}${h(m.en || m.name)}</button>`).join('')}</div>
     <div class="sec-head"><h3>五人同步</h3><span>${h(syncText())}</span></div>
-    ${CFG.sheetApi ? '<div class="sub">同步網址寫在 config.js。</div>' : `
+    ${CFG.sheetApi ? '<div class="sub">已內建同步，打開網站就會自動連上，不用設定。</div>' : `
     <div class="field"><label for="apiUrl">貼上邀請連結（或 Apps Script 網址）</label><input class="input" id="apiUrl" placeholder="https://kanweiting.github.io/...#api=..." value="${h(API.url)}"></div>
     <div class="row2"><button class="btn ghost" data-saveapi>儲存</button><button class="btn ghost" data-invite ${invite ? '' : 'disabled'}>複製邀請連結</button></div>
     <div class="muted small" style="margin-top:8px">把邀請連結傳到群組，大家點一次就會自動連上同一份帳本。</div>`}`,
