@@ -393,6 +393,111 @@ function openAddPlan(id, rec) {
   draw();
 }
 
+
+/* ---------- 準備：待辦清單＋記事本（只存在這支手機、每個人各自一份，不同步） ---------- */
+const TODO_TEMPLATE = [
+  { sec: '出發前要辦', items: ['護照（效期還有 6 個月以上）', 'Visit Japan Web 填好入境＋海關，截圖 QR Code', '機票／登機證、航班時間再確認一次', '旅平險／不便險', '網路：eSIM／網卡／漫遊開通', '換日圓現金', '信用卡開通海外刷卡（帶 2 張）', 'Suica／PASMO 加到手機錢包並儲值', 'Airbnb 地址＋入住方式截圖', 'Google Maps 下載東京離線地圖', '已訂位的餐廳再確認時間'] },
+  { sec: '證件與錢包', items: ['護照', '台灣身分證', '日圓＋台幣零錢', '信用卡', '證件影本／照片存手機'] },
+  { sec: '3C 與充電', items: ['手機充電器＋線', '行動電源（只能放隨身行李）', '耳機', '相機／記憶卡（有帶的話）'] },
+  { sec: '衣物（10 月東京約 15–22°C）', items: ['薄外套／防風外套', '長袖上衣', '褲子', '內衣褲、襪子（天數＋1）', '睡衣', '好走的鞋'] },
+  { sec: '盥洗與藥品', items: ['牙刷牙膏（Airbnb 不一定有）', '刮鬍刀', '保養品／隱形眼鏡', '常備藥、腸胃藥、止痛藥'] },
+  { sec: '其他', items: ['折疊傘', '購物袋／可折疊行李袋（裝戰利品）', '原子筆'] },
+];
+const Todo = {
+  key() { return `todo:${S.me || 'guest'}`; },
+  load() {
+    const saved = JSON.parse(localStorage.getItem(this.key()) || 'null');
+    if (saved) return saved;
+    let n = 0;
+    return { secs: TODO_TEMPLATE.map(s => ({ name: s.sec, items: s.items.map(t => ({ id: 't' + (n++), text: t, done: false })) })) };
+  },
+  save(d) { localStorage.setItem(this.key(), JSON.stringify(d)); },
+};
+function renderPrep() {
+  $$('#prepSeg button').forEach(b => b.classList.toggle('on', b.dataset.pview === (S.pview || 'todo')));
+  return (S.pview || 'todo') === 'todo' ? renderTodo() : renderMemo();
+}
+function renderTodo() {
+  const d = Todo.load(), all = d.secs.flatMap(s => s.items), done = all.filter(i => i.done).length;
+  const pct = all.length ? Math.round(done / all.length * 100) : 0;
+  $('#prepBody').innerHTML = `
+    <div class="prep-hero"><div><b>${done}</b> / ${all.length} 完成</div><div class="prep-bar"><i style="width:${pct}%"></i></div>
+      <div class="muted small">只存在這支手機，別人看不到你的進度${S.me ? '' : '（先選身分，清單會跟著你）'}</div></div>
+    ${d.secs.map((s, si) => { const dn = s.items.filter(i => i.done).length;
+      return `<div class="todo-sec"><div class="todo-h"><b>${h(s.name)}</b><span class="muted small">${dn}/${s.items.length}</span></div>
+        ${s.items.map((it, ii) => `<div class="todo-row ${it.done ? 'done' : ''}"><label><input type="checkbox" data-tchk="${si}:${ii}" ${it.done ? 'checked' : ''}><span>${h(it.text)}</span></label>
+          <button class="todo-del" data-tdel="${si}:${ii}" aria-label="刪除">✕</button></div>`).join('')}
+        <form class="todo-add" data-tadd="${si}"><input class="input" placeholder="＋ 新增項目" maxlength="60"><button class="mini">加入</button></form></div>`; }).join('')}
+    <form class="todo-add todo-newsec" data-tsec><input class="input" placeholder="＋ 新增一個分類（例：伴手禮清單）" maxlength="30"><button class="mini">新增分類</button></form>
+    <button class="btn danger" data-treset style="margin-top:14px">恢復預設清單</button>`;
+}
+function renderMemo() {
+  const k = `memo:${S.me || 'guest'}`, saved = JSON.parse(localStorage.getItem(k) || '{"text":"","at":null}');
+  $('#prepBody').innerHTML = `
+    <div class="memo-head"><span class="muted small">只存在這支手機，別人看不到 · 會自動儲存</span><span class="muted small" id="memoAt">${saved.at ? '已儲存 ' + h(fmtTs(saved.at)) : ''}</span></div>
+    <textarea id="memo" class="memo" placeholder="記點什麼…&#10;例：想買的東西、要提醒自己的事、店家營業時間">${h(saved.text)}</textarea>
+    <div class="row2" style="margin-top:10px"><button class="btn ghost" data-mcopy>複製全部</button><button class="btn ghost" data-mclear>清空</button></div>`;
+  const ta = $('#memo');
+  ta.oninput = () => { clearTimeout(ta.t); ta.t = setTimeout(() => {
+    const at = new Date().toISOString(); localStorage.setItem(k, JSON.stringify({ text: ta.value, at })); $('#memoAt').textContent = '已儲存 ' + fmtTs(at); }, 400); };
+}
+function bindPrep() {
+  $('#prepSeg').onclick = e => { const b = e.target.closest('[data-pview]'); if (b) { S.pview = b.dataset.pview; renderPrep(); } };
+  const body = $('#prepBody');
+  body.addEventListener('change', e => { const c = e.target.closest('[data-tchk]'); if (!c) return;
+    const [si, ii] = c.dataset.tchk.split(':').map(Number), d = Todo.load(); d.secs[si].items[ii].done = c.checked; Todo.save(d); renderTodo(); });
+  body.addEventListener('click', e => {
+    const del = e.target.closest('[data-tdel]');
+    if (del) { const [si, ii] = del.dataset.tdel.split(':').map(Number), d = Todo.load(); d.secs[si].items.splice(ii, 1); Todo.save(d); return renderTodo(); }
+    if (e.target.closest('[data-treset]')) { if (confirm('恢復成預設清單？你勾選和新增的項目都會清掉')) { localStorage.removeItem(Todo.key()); renderTodo(); } return; }
+    if (e.target.closest('[data-mcopy]')) { const v = $('#memo').value; navigator.clipboard?.writeText(v).then(() => toast('已複製'), () => toast('複製失敗')); return; }
+    if (e.target.closest('[data-mclear]')) { if (confirm('清空記事本？')) { localStorage.removeItem(`memo:${S.me || 'guest'}`); renderMemo(); } }
+  });
+  body.addEventListener('submit', e => {
+    e.preventDefault(); const f = e.target, v = f.querySelector('input').value.trim(); if (!v) return;
+    const d = Todo.load();
+    if ('tsec' in f.dataset) d.secs.push({ name: v, items: [] });
+    else d.secs[+f.dataset.tadd].items.push({ id: 'c' + Date.now(), text: v, done: false });
+    Todo.save(d); renderTodo();
+    const again = 'tadd' in f.dataset ? $(`[data-tadd="${f.dataset.tadd}"] input`) : null; again?.focus();
+  });
+}
+
+/* ---------- 行程：今日重點（自動整理＋負責人寫的摘要，五人共享） ---------- */
+function renderDaySummary() {
+  const d = S.day, items = dayItems(d), stops = items.map(i => byId[i.place]).filter(Boolean);
+  const areas = [...new Set(stops.map(p => p.area).filter(a => a && a !== '未定位'))];
+  const times = items.map(i => i.time).filter(Boolean).sort();
+  const closed = stops.filter(p => closedDays(p).includes(d)).map(p => p.name);
+  const rec = Store.of('summary').find(r => r.date === d);
+  $('#daySummary').innerHTML = `<div class="sum-card">
+    <div class="sum-auto">
+      ${areas.length ? `<span>📍 ${areas.map(h).join(' → ')}</span>` : '<span>📍 還沒排地點</span>'}
+      ${stops.length ? `<span>🍽️ ${stops.length} 站</span>` : ''}${times.length ? `<span>🕒 ${times[0]}–${times[times.length - 1]}</span>` : ''}
+      ${closed.length ? `<span class="badge warn">⚠️ ${closed.map(h).join('、')} 今天公休</span>` : ''}
+    </div>
+    <button class="sum-note" data-sumedit>
+      ${rec && rec.text ? `<div class="sum-by">${rec.owner ? av(rec.owner) : ''}<b>${rec.owner ? h(memberName(rec.owner)) + ' 的今日重點' : '今日重點'}</b><span class="muted small">${h(memberName(rec.by))} · ${h(fmtTs(rec.ts))}</span></div>
+        <div class="sum-text">${h(rec.text)}</div>`
+      : `<div class="sum-by">${rec?.owner ? av(rec.owner) : '<span class="av ghost">?</span>'}<b>${rec?.owner ? h(memberName(rec.owner)) + ' 負責今天' : '今日重點'}</b></div>
+        <div class="muted">還沒有人寫，點這裡${rec?.owner ? '' : '指定負責人、'}寫給大家看 ✍️</div>`}
+    </button></div>`;
+}
+function openSummary() {
+  const d = S.day, rec = Store.of('summary').find(r => r.date === d) || {};
+  const F = { owner: rec.owner || '', text: rec.text || '' };
+  const draw = () => openSheet(`<h2>D${dayNo(d)} ${dayLabel(d)} 今日重點</h2><div class="sub">五個人都看得到；誰都可以改</div>
+    <div class="field"><span class="field-label">今天的負責人</span><div class="people">${trip.members.map(m => `<button class="person ${F.owner === m.id ? 'on' : ''}" data-own="${m.id}">${av(m.id)}${h(m.name)}</button>`).join('')}</div></div>
+    <div class="field"><label for="sumText">重點</label><textarea id="sumText" class="memo" style="min-height:180px" placeholder="例：&#10;・10:30 在新宿站東口集合&#10;・午餐 Peter Luger 已訂位，11:00 前到&#10;・下午自由活動，18:00 回住宿">${h(F.text)}</textarea></div>
+    <div class="form-foot"><button class="btn" data-save>儲存</button>${rec.id ? '<button class="btn danger" data-del>清除今日重點</button>' : ''}</div>`, el => {
+      el.querySelectorAll('[data-own]').forEach(b => b.onclick = () => { F.text = el.querySelector('#sumText').value; F.owner = F.owner === b.dataset.own ? '' : b.dataset.own; draw(); });
+      el.querySelector('[data-save]').onclick = async () => { F.text = el.querySelector('#sumText').value.trim();
+        await Store.put({ id: 'summary-' + d, kind: 'summary', date: d, owner: F.owner, text: F.text }); closeSheet(); toast('已更新今日重點'); renderPlan(); };
+      const del = el.querySelector('[data-del]'); if (del) del.onclick = async () => { await Store.del('summary-' + d); closeSheet(); renderPlan(); };
+    });
+  draw();
+}
+
 /* ---------- 行程頁 ---------- */
 function renderPlan() {
   S.day = S.day || (trip.dates.includes(today()) ? today() : trip.dates[0]);
@@ -407,6 +512,7 @@ function renderPlan() {
   const stops = items.filter(i => byId[i.place]);
   $('#dayHead').innerHTML = `<div><h2>D${dayNo(S.day)} · ${dayLabel(S.day)}</h2><div class="muted">${stops.length} 個地點${items.length - stops.length ? ` · ${items.length - stops.length} 個交通／提醒` : ''}</div></div>
     ${stops.some(i => byId[i.place].lat) ? `<button class="btn-soft" data-route="${S.day}">${ICON.route}路線</button>` : ''}`;
+  renderDaySummary();
   let n = 0, prev = S.day !== trip.dates[0] && lod.lat ? lod : null;
   const rows = [];
   if (prev && stops.length) rows.push(`<li class="tl-item"><div class="tl-dot sys">🏠</div><div><div class="tl-card sys"><b>從住宿出發</b> <span class="muted small">${h(lod.station || lod.name)}</span></div></div></li>`);
@@ -760,7 +866,7 @@ const fmtTs = iso => { if (!iso) return ''; const d = new Date(iso); return `${d
 function render() {
   $$('.tab').forEach(s => s.hidden = s.id !== 'tab-' + S.tab);
   $$('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
-  ({ plan: renderPlan, map: renderMap, list: renderList, stats: renderStats, money: renderMoney })[S.tab]();
+  ({ plan: renderPlan, map: renderMap, list: renderList, prep: renderPrep, stats: renderStats, money: renderMoney })[S.tab]();
 }
 function go(tab) { S.tab = tab; Pref.set('tab', tab); render(); scrollTo(0, 0); }
 function bind() {
@@ -770,7 +876,7 @@ function bind() {
   $('#addExpBtn').onclick = () => openExpense();
   $('#moneySeg').onclick = e => { const b = e.target.closest('[data-mview]'); if (b) { S.mview = b.dataset.mview; renderMoney(); } };
   document.addEventListener('click', async e => {
-    const t = e.target.closest('[data-fav],[data-day],[data-hide],[data-showall],[data-hideall],[data-favlayer],[data-type],[data-route],[data-clear-route],[data-exp],[data-pedit-tl],[data-gsearch],[data-open],[data-area]');
+    const t = e.target.closest('[data-fav],[data-day],[data-hide],[data-showall],[data-hideall],[data-favlayer],[data-type],[data-route],[data-clear-route],[data-exp],[data-sumedit],[data-pedit-tl],[data-gsearch],[data-open],[data-area]');
     if (!t || t.closest('#sheet')) return;
     if (t.dataset.fav) { e.stopPropagation(); return toggleFav(t.dataset.fav); }
     if (t.dataset.day) { S.day = t.dataset.day; return renderPlan(); }
@@ -782,6 +888,7 @@ function bind() {
     if (t.dataset.route) { S.routeDay = t.dataset.route; return go('map'); }
     if ('clearRoute' in t.dataset) { S.routeDay = null; return renderMap(); }
     if (t.dataset.exp) return openExpense(t.dataset.exp);
+    if ('sumedit' in t.dataset) return openSummary();
     if ('gsearch' in t.dataset) return openGoogleSearch($('#q').value.trim());
     if (t.dataset.peditTl) { const it = findItem(t.dataset.peditTl); return openAddPlan(it.place, it); }
     if (t.dataset.open) { if (S.tab === 'map' && t.closest('#carousel') && S.sel !== t.dataset.open) return selectPlace(t.dataset.open, { scroll: true }); return openPlace(t.dataset.open); }
@@ -802,7 +909,7 @@ async function main() {
   mergeUserPlaces();
   document.title = trip.title; $('#appTitle').innerHTML = `<svg class="jp-flag" viewBox="0 0 30 20" aria-label="日本"><rect width="30" height="20" rx="2" fill="#fff"/><circle cx="15" cy="10" r="6" fill="#e60033"/></svg>${h(trip.short || trip.title)}`;
   S.tab = Pref.get('tab', 'plan');
-  renderMe(); fillFilters(); bind();
+  renderMe(); fillFilters(); bind(); bindPrep();
   await Store.load(); renderSync(); mergeUserPlaces();
   render();
   setInterval(refresh, 20000);

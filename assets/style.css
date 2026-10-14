@@ -363,3 +363,31 @@ main { padding-top: calc(var(--appbar) + var(--safe-t)); padding-bottom: calc(va
 .gsearch { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; text-align: left; width: 100%; border: 1.5px dashed var(--brand); background: var(--brand-soft); color: var(--ink); border-radius: var(--r); padding: 12px 14px; }
 .gsearch .gs-ic { font-size: 22px; }
 .gsearch small { display: block; color: var(--ink-2); font-size: 12px; margin-top: 2px; }
+
+/* 準備：待辦＋記事本 */
+.prep-hero { background: var(--card); border-radius: var(--r); padding: 14px; box-shadow: var(--shadow); margin: 12px 0; }
+.prep-hero b { font-size: 26px; }
+.prep-bar { height: 10px; background: var(--card-2); border-radius: 999px; overflow: hidden; margin: 8px 0 6px; }
+.prep-bar i { display: block; height: 100%; background: var(--brand); border-radius: 999px; transition: width .3s; }
+.todo-sec { background: var(--card); border-radius: var(--r); padding: 6px 12px 10px; box-shadow: var(--shadow); margin-bottom: 10px; }
+.todo-h { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 2px 4px; }
+.todo-row { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+.todo-row label { flex: 1; display: flex; gap: 10px; align-items: center; padding: 10px 2px; min-height: 44px; cursor: pointer; }
+.todo-row input { width: 20px; height: 20px; accent-color: var(--brand); flex: none; }
+.todo-row.done span { color: var(--ink-3); text-decoration: line-through; }
+.todo-del { border: 0; background: none; color: var(--ink-3); width: 36px; height: 36px; font-size: 14px; }
+.todo-add { display: flex; gap: 8px; margin-top: 8px; }
+.todo-add .input { padding: 8px 10px; font-size: 15px; }
+.todo-newsec { background: var(--card); border-radius: var(--r); padding: 10px 12px; box-shadow: var(--shadow); }
+.memo-head { display: flex; justify-content: space-between; margin: 12px 2px 6px; }
+.memo { width: 100%; min-height: 55vh; border: 1.5px solid var(--line); background: var(--card); border-radius: 14px; padding: 12px 14px; font-size: 16px; line-height: 1.6; resize: vertical; outline: 0; }
+.memo:focus { border-color: var(--brand); }
+/* 今日重點 */
+.sum-card { background: var(--card); border-radius: var(--r); box-shadow: var(--shadow); margin-bottom: 14px; overflow: hidden; }
+.sum-auto { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 14px; background: var(--brand-soft); font-size: 13px; font-weight: 700; color: var(--brand); }
+.sum-note { display: block; width: 100%; border: 0; background: none; text-align: left; padding: 10px 14px 12px; }
+.sum-by { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.sum-by .muted { margin-left: auto; }
+.sum-text { white-space: pre-line; font-size: 14.5px; line-height: 1.6; }
+.tabbar button span { white-space: nowrap; }
+.todo-add .mini { flex: none; white-space: nowrap; background: var(--brand-soft); color: var(--brand); }
