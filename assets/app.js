@@ -215,8 +215,10 @@ function dayItems(d) {
     ...(sheetPlan.days[d] || []).map(it => ({ ...it, date: d, fromSheet: true, _k: `s:${d}:${it.place || it.title}:${it.slot}` }))]   // Sheet「餐廳安排」
     .filter(it => !hidden.has(it._k));
   const added = Store.of('plan').filter(r => r.date === d).map(r => ({ ...r, _k: r.id, mine: true }));
+  // 沒填時間的照時段排（例：「下午」排在 15:30 左右），不要被擠到最後
+  const SLOT_AT = { 早餐: '08:00', 上午: '10:00', 午餐: '12:00', 景點: '14:00', 下午: '15:30', 購物: '15:30', 晚餐: '18:30', BAR: '21:00', 宵夜: '22:30' };
   let last = '00:00';
-  const byTime = [...base, ...added].map((it, i) => { const k = it.time || last; last = k; return { it, k, i }; })
+  const byTime = [...base, ...added].map((it, i) => { const k = it.time || SLOT_AT[it.slot] || last; last = k; return { it, k, i }; })
     .sort((a, b) => a.k.localeCompare(b.k) || a.i - b.i).map(x => x.it);
   const ord = Store.of('order').find(r => r.date === d)?.keys;      // 拖拉後的順序
   if (!ord) return byTime;
@@ -533,9 +535,9 @@ function renderPlan() {
         </div></div></li>`);
       if (p.lat) prev = p;
     } else {
-      const ic = /抵達|起飛|JX|航/.test((it.title || '') + it.slot) ? '✈️' : it.slot === '退房' ? '🧳' : '📌';
+      const ic = it.icon || (/抵達|起飛|JX|航/.test((it.title || '') + it.slot) ? '✈️' : it.slot === '退房' ? '🧳' : '📌');
       rows.push(`<li class="tl-item" data-k="${h(it._k)}"><div class="tl-dot sys">${ic}</div><div><div class="tl-card sys">
-        <div class="tl-time">${h(it.time || '')}${it.time ? ' · ' : ''}${h(it.slot || '')}</div><b>${h(it.title || '')}</b>${it.note ? `<div class="muted small">${h(it.note)}</div>` : ''}</div></div></li>`);
+        <div class="tl-time">${h(it.time || '')}${it.time ? ' · ' : ''}${h(it.slot || '')}</div><b>${h(it.title || '')}</b>${it.note ? `<div class="muted small">${h(it.note)}</div>` : ''}${it.url ? `<a class="small" href="${h(it.url)}" target="_blank" rel="noopener">📍 Google Maps</a>` : ''}</div></div></li>`);
     }
   }
   $('#timeline').innerHTML = rows.join('') || '<div class="empty">這天還沒排行程<br><span class="small">到「探索」點地點 →「加入行程」</span></div>';

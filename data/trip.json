@@ -113,6 +113,43 @@
         "slot": "抵達",
         "time": "12:55",
         "title": "JX800 抵達成田 T2（4 人）"
+      },
+      {
+        "slot": "交通",
+        "time": "14:00",
+        "title": "Skyliner → 京成上野",
+        "note": "T2 車站兌換「Skyliner＋Tokyo Subway Ticket」；持套票不能在日暮里轉 JR，坐到上野",
+        "icon": "🚃"
+      },
+      {
+        "slot": "交通",
+        "time": "14:45",
+        "title": "上野 → 銀座線 → 銀座",
+        "note": "約 10–15 分鐘",
+        "icon": "🚇"
+      },
+      {
+        "slot": "寄行李",
+        "time": "15:15",
+        "title": "寄行李（有樂町 1-6-5）",
+        "note": "Miami Hibiya Building",
+        "icon": "🧳",
+        "url": "https://www.google.com/maps/search/?api=1&query=Miami+Hibiya+Building+1-6-5+Yurakucho+Chiyoda+Tokyo"
+      },
+      {
+        "slot": "取行李",
+        "time": "21:30",
+        "title": "取行李 → 中野新橋",
+        "note": "22:00 前一定要拿到；銀座站丸之內線（往荻窪）→ 中野坂上換分線（往方南町）1 站",
+        "icon": "🧳",
+        "url": "https://www.google.com/maps/search/?api=1&query=Miami+Hibiya+Building+1-6-5+Yurakucho+Chiyoda+Tokyo"
+      },
+      {
+        "slot": "入住",
+        "time": "22:15",
+        "title": "Airbnb check-in",
+        "note": "中野區南台 1-1-17",
+        "icon": "🏠"
       }
     ],
     "2026-10-18": [],
