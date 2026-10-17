@@ -391,3 +391,13 @@ main { padding-top: calc(var(--appbar) + var(--safe-t)); padding-bottom: calc(va
 .sum-text { white-space: pre-line; font-size: 14.5px; line-height: 1.6; }
 .tabbar button span { white-space: nowrap; }
 .todo-add .mini { flex: none; white-space: nowrap; background: var(--brand-soft); color: var(--brand); }
+
+/* 行程提醒的移除鈕 */
+.tl-card.sys { position: relative; padding-right: 40px; }
+.tl-x { position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; border: 0; border-radius: 50%; background: none; color: var(--ink-3); font-size: 13px; }
+.tl-x:active { background: var(--card); }
+/* 收據 */
+.receipt { display: flex; gap: 12px; align-items: center; margin: 10px 0 4px; }
+.receipt img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); display: block; }
+.rc-body { flex: 1; display: grid; gap: 4px; }
+.rc-btn { justify-content: center; cursor: pointer; width: 100%; }

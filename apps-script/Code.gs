@@ -23,13 +23,25 @@ function doGet(e) {
 function doPost(e) {
   const lock = LockService.getScriptLock(); lock.waitLock(10000);
   try {
-    const body = JSON.parse(e.postData.contents), sh = sheet_();
+    const body = JSON.parse(e.postData.contents);
+    if (body.op === 'photo') return json_({ ok: true, id: savePhoto_(body) });
+    const sh = sheet_();
     const ids = sh.getRange(1, 1, sh.getLastRow(), 1).getValues().map(r => String(r[0]));
     const id = body.op === 'put' ? body.rec.id : body.id, at = ids.indexOf(id);
     if (at > 0) sh.deleteRow(at + 1);
     if (body.op === 'put') sh.appendRow([body.rec.id, body.rec.kind, JSON.stringify(body.rec), body.rec.ts]);
     return json_({ ok: true });
   } finally { lock.releaseLock(); }
+}
+
+// 收據照片 → Google Drive「東京行收據」資料夾，開放「知道連結的人可檢視」
+function savePhoto_(body) {
+  const it = DriveApp.getFoldersByName('東京行收據');
+  const folder = it.hasNext() ? it.next() : DriveApp.createFolder('東京行收據');
+  const blob = Utilities.newBlob(Utilities.base64Decode(body.data), body.mime || 'image/jpeg', body.name || 'receipt.jpg');
+  const f = folder.createFile(blob);
+  f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return f.getId();
 }
 
 // 找地點：有設定 PLACES_KEY（專案設定 → 指令碼屬性）就用 Google Places，拿得到真正的店名和評分；

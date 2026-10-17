@@ -283,7 +283,10 @@ function pcard(p, opt = {}) {
 
 /* ---------- Bottom sheet ---------- */
 function openSheet(html, bind) {
-  $('#sheetBody').innerHTML = html; $('#sheet').hidden = false; $('#backdrop').hidden = false; $('#sheetBody').scrollTop = 0;
+  // 同一個表單重畫（例如點人頭、切換分法）時保留捲動位置，不要跳回最上面
+  const body = $('#sheetBody'), title = t => (t.match(/<h2>([\s\S]*?)<\/h2>/) || [])[1];
+  const same = !$('#sheet').hidden && title(body.innerHTML) === title(html), y = body.scrollTop;
+  body.innerHTML = html; $('#sheet').hidden = false; $('#backdrop').hidden = false; body.scrollTop = same ? y : 0;
   document.body.style.overflow = 'hidden';
   if (!openSheet.pushed) { history.pushState({ sheet: 1 }, ''); openSheet.pushed = true; }
   bind && bind($('#sheetBody'));
@@ -537,6 +540,7 @@ function renderPlan() {
     } else {
       const ic = it.icon || (/抵達|起飛|JX|航/.test((it.title || '') + it.slot) ? '✈️' : it.slot === '退房' ? '🧳' : '📌');
       rows.push(`<li class="tl-item" data-k="${h(it._k)}"><div class="tl-dot sys">${ic}</div><div><div class="tl-card sys">
+        <button class="tl-x" data-sysrm="${h(it._k)}" aria-label="從行程移除">✕</button>
         <div class="tl-time">${h(it.time || '')}${it.time ? ' · ' : ''}${h(it.slot || '')}</div><b>${h(it.title || '')}</b>${it.note ? `<div class="muted small">${h(it.note)}</div>` : ''}${it.url ? `<a class="small" href="${h(it.url)}" target="_blank" rel="noopener">📍 Google Maps</a>` : ''}</div></div></li>`);
     }
   }
@@ -765,7 +769,7 @@ function renderMoney() {
     body.innerHTML = Object.entries(groups).map(([d, es]) => `<div class="day-group"><span>${trip.dates.includes(d) ? `D${dayNo(d)} · ` : ''}${dayLabel(d)} · ${es.length} 筆</span><span>小計 ¥${fmt(sub(es))}${me ? `<small> · 我 ¥${fmt(mySub(es))}</small>` : ''}</span></div>` +
       es.map(e => { const c = CAT[e.cat] || CAT.other, mine = me ? owed(e)[me] || 0 : null;
         return `<button class="exp" data-exp="${e.id}"><div class="icon-tile sm" style="--c:var(--seq)">${c.icon}</div>
-          <div class="body"><div class="t">${h(e.title)}</div><div class="s">${e.at.slice(11, 16)} · ${h(memberName(e.payer))} 付 · ${e.people.length === trip.members.length ? '全部人' : e.people.length + ' 人'}${{ ratio: '·比例', amount: '·指定金額' }[e.mode] || ''}</div></div>
+          <div class="body"><div class="t">${e.photo ? '📷 ' : ''}${h(e.title)}</div><div class="s">${e.at.slice(11, 16)} · ${h(memberName(e.payer))} 付 · ${e.people.length === trip.members.length ? '全部人' : e.people.length + ' 人'}${{ ratio: '·比例', amount: '·指定金額' }[e.mode] || ''}</div></div>
           <div class="amt">${curSym(e.currency)}${fmt(+e.amount)}${mine != null ? `<small class="${mine ? '' : 'muted'}">${mine ? '我 ¥' + fmt(mine) : '與我無關'}</small>` : ''}</div></button>`; }).join('')).join('') +
       `<div class="grand"><span>總計 · ${L0.ex.length} 筆</span><b>¥${fmt(L0.total)}</b><small>${twd(L0.total)}${me ? ` · 我 ¥${fmt(L0.share[me])}` : ''}</small></div>`;
   } else if (S.mview === 'daily') {
@@ -794,7 +798,7 @@ function renderMoney() {
 function openExpense(id) {
   const old = id ? norm(Store.of('exp').find(r => r.id === id)) : null;
   const at0 = old?.at || nowLocal();
-  const F = old ? { ...old, shares: { ...old.shares }, people: [...old.people] } : {
+  const F = old ? { ...old, shares: { ...old.shares }, people: [...old.people], preview: null, ocrMsg: '' } : {
     amount: '', currency: Pref.get('cur', 'JPY'), title: '', cat: 'food', at: at0, payer: S.me || trip.members[0].id,
     people: trip.members.filter(m => presentOn(m.id, at0.slice(0, 10))).map(m => m.id), mode: 'equal', shares: {} };
   let touchedPeople = !!old;
@@ -815,6 +819,11 @@ function openExpense(id) {
   const draw = () => openSheet(`
     <h2>${old ? '編輯這筆' : '記一筆'}</h2>
     <div class="field"><div class="amount-row"><span class="cur">${curSym(F.currency)}</span><input id="fAmt" inputmode="decimal" placeholder="0" value="${h(F.amount)}" aria-label="金額"></div></div>
+    <div class="receipt">
+      ${F.preview || F.photo ? `<a ${F.photo ? `href="${h(photoLink(F.photo))}" target="_blank" rel="noopener"` : ''}><img src="${h(F.preview || photoUrl(F.photo))}" alt="收據"></a>` : ''}
+      <div class="rc-body"><label class="btn-soft rc-btn">📷 ${F.preview || F.photo ? '換一張收據' : '拍收據／上傳照片，自動帶入金額和時間'}<input type="file" id="fPhoto" accept="image/*" hidden></label>
+        ${F.ocrMsg ? `<div class="small ${F.ocrBad ? 'neg' : 'muted'}">${h(F.ocrMsg)}</div>` : ''}</div>
+    </div>
     <div class="seg" data-g="currency">${['JPY', 'TWD'].map(c => `<button class="${F.currency === c ? 'on' : ''}" data-v="${c}">${c === 'JPY' ? '¥ 日圓' : 'NT$ 台幣'}</button>`).join('')}</div>
     <div class="field"><label for="fTitle">這次是什麼</label><input class="input" id="fTitle" placeholder="例：Peter Luger 午餐、Suica 加值" value="${h(F.title)}" maxlength="40"></div>
     <div class="field"><span class="field-label">類別</span><div class="cat-grid">${CATS.map(c => `<button class="cat-btn ${F.cat === c.id ? 'on' : ''}" data-cat="${c.id}"><i>${c.icon}</i>${c.name}</button>`).join('')}</div></div>
@@ -834,6 +843,26 @@ function openExpense(id) {
     <div class="form-foot"><button class="btn" data-save>${old ? '儲存修改' : '新增'}</button>${old ? '<button class="btn danger" data-del>刪除這筆</button>' : ''}</div>`, bind);
   const keep = el => { F.amount = el.querySelector('#fAmt').value; F.title = el.querySelector('#fTitle').value; F.at = el.querySelector('#fAt').value || F.at; };
   function bind(el) {
+    el.querySelector('#fPhoto').onchange = async e => {
+      const file = e.target.files[0]; if (!file) return;
+      keep(el);
+      const small = await fileToCanvas(file, 1280).catch(() => null);
+      if (!small) { F.ocrMsg = '讀不到這張照片'; F.ocrBad = true; return draw(); }
+      F.preview = small.toDataURL('image/jpeg', 0.6); F.photo = null; F.ocrMsg = '上傳照片、辨識收據中…（第一次會下載辨識模型，稍等一下）'; F.ocrBad = false; draw();
+      F.uploading = uploadPhoto(small).then(id => { F.photo = id; F.uploading = null; return id; });
+      try {
+        await loadTesseract();
+        const big = await fileToCanvas(file, 1800);
+        const { data } = await Tesseract.recognize(big, 'jpn+eng', { logger: m => { if (m.status === 'recognizing text') { const s = el.querySelector('.rc-body .small'); if (s) s.textContent = `辨識中… ${Math.round(m.progress * 100)}%`; } } });
+        const r = parseReceipt(data.text || ''), got = [];
+        if (r.amount) { F.amount = String(r.amount); F.currency = 'JPY'; got.push(`合計 ¥${fmt(r.amount)}`); if (F.mode === 'amount') defaults(); }
+        if (r.at && typeof r.at === 'string') { F.at = r.at; got.push(`時間 ${md(r.at)} ${r.at.slice(11)}`); }
+        else if (r.at?.timeOnly) { F.at = F.at.slice(0, 11) + r.at.timeOnly; got.push(`時間 ${r.at.timeOnly}`); }
+        F.ocrMsg = got.length ? `✓ 已帶入 ${got.join('、')}，請確認是否正確` : '沒辨識到金額或時間，請手動輸入（照片一樣會存起來）'; F.ocrBad = !got.length;
+      } catch (err) { F.ocrMsg = '辨識失敗（網路不穩？），請手動輸入；照片一樣會存起來'; F.ocrBad = true; }
+      if (!el.isConnected) return;
+      const cur = $('#sheetBody'); if (cur.querySelector('#fAmt')) { F.title = cur.querySelector('#fTitle').value || F.title; draw(); }
+    };
     el.querySelector('#fAmt').oninput = e => { F.amount = e.target.value.replace(/[^\d.]/g, ''); if (F.mode === 'amount' && !touchedShares) { defaults(); el.querySelectorAll('[data-share]').forEach(i => i.value = F.shares[i.dataset.share]); } refresh(el); };
     el.querySelector('#fAt').onchange = e => { F.at = e.target.value; if (!touchedPeople) { keep(el); F.people = trip.members.filter(m => presentOn(m.id, F.at.slice(0, 10))).map(m => m.id); defaults(); draw(); } };
     el.querySelectorAll('[data-g] button').forEach(b => b.onclick = () => { keep(el); const g = b.parentElement.dataset.g; F[g] = b.dataset.v; if (g === 'mode') { touchedShares = false; defaults(); } if (g === 'currency') Pref.set('cur', F.currency); draw(); });
@@ -856,13 +885,60 @@ function openExpense(id) {
     if (F.mode === 'ratio' && !F.people.some(i => +F.shares[i] > 0)) return toast('比例不能全為 0');
     if (F.mode === 'amount' && Math.abs(F.people.reduce((a, i) => a + (+F.shares[i] || 0), 0) - t) >= 1) return toast('分配金額加總要等於總金額');
     const shares = F.mode === 'equal' ? {} : Object.fromEntries(F.people.map(i => [i, +F.shares[i] || 0]));
-    await Store.put({ ...(old || {}), kind: 'exp', amount: t, currency: F.currency, title: F.title.trim() || CAT[F.cat].name, cat: F.cat, at: F.at,
+    if (F.uploading) { toast('照片上傳中…'); await F.uploading; }
+    if (F.preview && !F.photo) toast('照片沒上傳成功（後台可能還沒更新），帳先記下了');
+    await Store.put({ ...(old || {}), photo: F.photo || old?.photo || null, kind: 'exp', amount: t, currency: F.currency, title: F.title.trim() || CAT[F.cat].name, cat: F.cat, at: F.at,
       payer: F.payer, people: F.people, mode: F.mode, shares, split: undefined, date: undefined });
     closeSheet(); toast(old ? '已更新' : '已記下 ✓'); S.mview = 'list'; renderMoney();
   }
   draw();
 }
 const fmtTs = iso => { if (!iso) return ''; const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
+
+/* ---------- 收據：拍照 → 文字辨識（Tesseract.js，手機上跑）→ 帶入合計與時間；照片存 Google Drive ---------- */
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve();
+  return loadTesseract.p ||= new Promise((ok, no) => { const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'; s.onload = ok; s.onerror = () => { loadTesseract.p = null; no(new Error('load')); }; document.head.appendChild(s); });
+}
+function fileToCanvas(file, max) {
+  return new Promise((ok, no) => { const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => { const k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); ok(c); };
+    img.onerror = no; img.src = url; });
+}
+function parseReceipt(raw) {
+  const z2h = s => s.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[，､]/g, ',').replace(/[：]/g, ':').replace(/[￥\\]/g, '¥');
+  const text = z2h(raw), lines = text.split(/\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const num = l => { const m = [...l.replace(/(\d) (?=\d{3}\b)/g, '$1').matchAll(/¥?\s*(\d{1,3}(?:,\d{3})+|\d{2,7})(?!\s*[%点個円点年月日:\/-]\d)/g)].map(x => +x[1].replace(/,/g, ''));
+    return m.length ? m[m.length - 1] : null; };
+  const bad = /預|釣|おつり|お釣|税率|対象|点数|個数|ポイント|No\.|TEL|電話|登録番号/;
+  let amount = null;
+  for (const rx of [/総合計|お会計|ご請求|お支払|合\s*計|TOTAL|Total/, /(?<!小)計/]) {
+    const hit = lines.filter(l => rx.test(l) && !bad.test(l)).map(num).filter(v => v && v >= 10);
+    if (hit.length) { amount = Math.max(...hit); break; }
+  }
+  if (!amount) { const yen = lines.filter(l => /¥|円/.test(l) && !bad.test(l)).map(num).filter(v => v && v >= 10); if (yen.length) amount = Math.max(...yen); }
+  let y, mo, d;
+  const dm = text.match(/(20\d{2})\s*[年\/.\-]\s*(\d{1,2})\s*[月\/.\-]\s*(\d{1,2})/) || text.match(/令和\s*(\d{1,2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})/);
+  if (dm) { y = dm[0].includes('令和') ? 2018 + +dm[1] : +dm[1]; mo = +dm[2]; d = +dm[3]; }
+  const tm = [...text.matchAll(/(?<!\d)([01]?\d|2[0-3])\s*:\s*([0-5]\d)(?!\d)/g)][0];
+  let at = null;
+  if (dm && mo >= 1 && mo <= 12 && d >= 1 && d <= 31) at = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}T${tm ? String(+tm[1]).padStart(2, '0') + ':' + tm[2] : '12:00'}`;
+  else if (tm) at = { timeOnly: `${String(+tm[1]).padStart(2, '0')}:${tm[2]}` };
+  return { amount, at };
+}
+async function uploadPhoto(canvas) {
+  if (!API.url) return null;
+  const data = canvas.toDataURL('image/jpeg', 0.72).split(',')[1];
+  try {
+    const r = await fetch(API.url, { method: 'POST', body: JSON.stringify({ op: 'photo', name: `receipt_${Date.now()}.jpg`, mime: 'image/jpeg', data }) }).then(r => r.json());
+    return r.id || null;
+  } catch (e) { return null; }
+}
+const photoUrl = id => `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1000`;
+const photoLink = id => `https://drive.google.com/file/d/${encodeURIComponent(id)}/view`;
 
 /* ---------- 主流程 ---------- */
 function render() {
@@ -878,7 +954,7 @@ function bind() {
   $('#addExpBtn').onclick = () => openExpense();
   $('#moneySeg').onclick = e => { const b = e.target.closest('[data-mview]'); if (b) { S.mview = b.dataset.mview; renderMoney(); } };
   document.addEventListener('click', async e => {
-    const t = e.target.closest('[data-fav],[data-day],[data-hide],[data-showall],[data-hideall],[data-favlayer],[data-type],[data-route],[data-clear-route],[data-exp],[data-sumedit],[data-pedit-tl],[data-gsearch],[data-open],[data-area]');
+    const t = e.target.closest('[data-fav],[data-day],[data-hide],[data-showall],[data-hideall],[data-favlayer],[data-type],[data-route],[data-clear-route],[data-exp],[data-sysrm],[data-sumedit],[data-pedit-tl],[data-gsearch],[data-open],[data-area]');
     if (!t || t.closest('#sheet')) return;
     if (t.dataset.fav) { e.stopPropagation(); return toggleFav(t.dataset.fav); }
     if (t.dataset.day) { S.day = t.dataset.day; return renderPlan(); }
@@ -891,6 +967,8 @@ function bind() {
     if ('clearRoute' in t.dataset) { S.routeDay = null; return renderMap(); }
     if (t.dataset.exp) return openExpense(t.dataset.exp);
     if ('sumedit' in t.dataset) return openSummary();
+    if (t.dataset.sysrm) { const it = findItem(t.dataset.sysrm); if (!it || !confirm(`從 D${dayNo(it.date)} 移除「${it.title || it.slot}」？`)) return;
+      await removeItem(it); toast('已移除'); return renderPlan(); }
     if ('gsearch' in t.dataset) return openGoogleSearch($('#q').value.trim());
     if (t.dataset.peditTl) { const it = findItem(t.dataset.peditTl); return openAddPlan(it.place, it); }
     if (t.dataset.open) { if (S.tab === 'map' && t.closest('#carousel') && S.sel !== t.dataset.open) return selectPlace(t.dataset.open, { scroll: true }); return openPlace(t.dataset.open); }
