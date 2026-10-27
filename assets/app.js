@@ -798,14 +798,24 @@ function renderMoney() {
   } else if (S.mview === 'settle') {
     const sd = SETTLE_DAY(), fxs = fxOn(sd);
     body.innerHTML = `<div class="sec-head"><h3>結清建議</h3><span>最少轉帳次數 · 台幣用 ${h(fxs.src)} ${fxs.rate}</span></div>` +
-      (L0.tx.length ? L0.tx.map(([a, b, v]) => { const amt = Math.round(v);
-        return `<div class="settle">${av(a)}<b>${h(memberName(a))}</b><span class="arrow">${ICON.arrow}</span>${av(b)}<b>${h(memberName(b))}</b>
-        <div class="amt">¥${fmt(amt)}<small>${twd(amt)}</small></div>
-        ${me === b ? `<button class="mini st-ok" data-settle="${a}|${b}|${amt}">核銷</button>` : `<span class="st-wait">待 ${h(memberName(b))} 核銷</span>`}</div>`; }).join('')
-        : `<div class="empty">${L0.settles.length ? '全部結清了 🎉' : '目前不用轉帳 👍'}</div>`) +
+      (() => {
+        // 每列＝一筆建議轉帳；如果還款人已經按了「已還款」就帶上那筆紀錄（金額以按下時為準）
+        const paids = Store.of('paid'), used = new Set();
+        const list = L0.tx.map(([a, b, v]) => { const pd = paids.find(x => x.from === a && x.to === b && !used.has(x.id)); if (pd) used.add(pd.id); return { a, b, amt: Math.round(v), pd }; });
+        paids.filter(x => !used.has(x.id)).forEach(pd => list.push({ a: pd.from, b: pd.to, amt: +pd.amount, pd }));
+        if (!list.length) return `<div class="empty">${L0.settles.length ? '全部結清了 🎉' : '目前不用轉帳 👍'}</div>`;
+        return list.map(({ a, b, amt, pd }) => { const show = pd ? +pd.amount : amt;
+          const payBtn = me === a ? (pd ? `<button class="mini" data-unpaid="${h(pd.id)}">取消還款</button>` : `<button class="mini st-pay" data-paid="${a}|${b}|${amt}">已還款</button>`) : '';
+          const okBtn = me === b ? `<button class="mini st-ok ${pd ? '' : 'st-off'}" data-settle="${a}|${b}|${show}" ${pd ? `data-pid="${h(pd.id)}"` : ''}>核銷</button>` : '';
+          const status = pd ? `<span class="st-tag paid">💸 ${h(memberName(a))} ${h(fmtTs(pd.ts))} 已還款 · 待 ${h(memberName(b))} 核銷</span>`
+            : `<span class="st-tag">⏳ 待 ${h(memberName(a))} 還款</span>`;
+          return `<div class="settle ${pd ? 'is-paid' : ''}">${av(a)}<b>${h(memberName(a))}</b><span class="arrow">${ICON.arrow}</span>${av(b)}<b>${h(memberName(b))}</b>
+            <div class="amt">¥${fmt(show)}<small>${twd(show)}</small></div>
+            <div class="st-row">${status}<span class="st-btns">${payBtn}${okBtn}</span></div></div>`; }).join('');
+      })() +
       (L0.settles.length ? `<div class="sec-head"><h3>已核銷</h3><span>${L0.settles.length} 筆</span></div>` + L0.settles.map(st =>
         `<div class="settle done">${av(st.from)}<b>${h(memberName(st.from))}</b><span class="arrow">${ICON.arrow}</span>${av(st.to)}<b>${h(memberName(st.to))}</b>
-        <div class="amt">¥${fmt(+st.amount)}<small>✓ ${h(memberName(st.to))} ${h(fmtTs(st.ts))} 確認收到</small></div>
+        <div class="amt">¥${fmt(+st.amount)}<small>${st.paidAt ? `💸 ${h(memberName(st.from))} ${h(fmtTs(st.paidAt))} 還款 · ` : ''}✓ ${h(memberName(st.to))} ${h(fmtTs(st.ts))} 核銷</small></div>
         ${me === st.to ? `<button class="mini" data-unsettle="${h(st.id)}">取消</button>` : ''}</div>`).join('') : '') +
       `<div class="sec-head"><h3>每人收支</h3><span>付出 − 應負擔</span></div><div class="panel" style="margin-top:0">` +
       trip.members.map(m => `<div class="bal">${av(m.id)}<div><b>${h(m.name)}</b><div class="muted small">付 ¥${fmt(L0.paid[m.id])} · 花 ¥${fmt(L0.share[m.id])}</div></div>
@@ -980,10 +990,21 @@ function bind() {
   $('#addExpBtn').onclick = () => openExpense();
   $('#moneyBody').addEventListener('click', async e => {
     const ok = e.target.closest('[data-settle]'), un = e.target.closest('[data-unsettle]');
+    const pay = e.target.closest('[data-paid]'), unpay = e.target.closest('[data-unpaid]');
+    if (pay) { const [from, to, amount] = pay.dataset.paid.split('|');
+      if (S.me !== from) return toast('只有還款的人可以按「已還款」');
+      if (!confirm(`確認已經轉 ¥${fmt(+amount)} 給 ${memberName(to)}？\n按下後 ${memberName(to)} 就可以核銷`)) return;
+      await Store.put({ kind: 'paid', from, to, amount: +amount }); toast(`已通知 ${memberName(to)} 核銷`); return renderMoney(); }
+    if (unpay) { const pd = Store.of('paid').find(x => x.id === unpay.dataset.unpaid);
+      if (!pd || S.me !== pd.from) return toast('只有還款的人可以取消');
+      if (!confirm('取消「已還款」？')) return;
+      await Store.del(pd.id); toast('已取消還款'); return renderMoney(); }
     if (ok) { const [from, to, amount] = ok.dataset.settle.split('|');
       if (S.me !== to) return toast('只有收款的人可以核銷');
+      const pd = Store.of('paid').find(x => x.id === ok.dataset.pid);
+      if (!pd) return alert(`${memberName(from)} 還沒按「已還款」。\n等 ${memberName(from)} 轉帳並按下「已還款」後，才能核銷。`);
       if (!confirm(`確認已經收到 ${memberName(from)} 轉來的 ¥${fmt(+amount)}？`)) return;
-      await Store.put({ kind: 'settle', from, to, amount: +amount }); toast('已核銷 ✓'); return renderMoney(); }
+      await Store.put({ kind: 'settle', from, to, amount: +amount, paidAt: pd.ts }); await Store.del(pd.id); toast('已核銷 ✓'); return renderMoney(); }
     if (un) { const st = Store.of('settle').find(x => x.id === un.dataset.unsettle);
       if (!st || S.me !== st.to) return toast('只有收款的人可以取消');
       if (!confirm(`取消這筆核銷（${memberName(st.from)} → ${memberName(st.to)} ¥${fmt(+st.amount)}）？`)) return;
