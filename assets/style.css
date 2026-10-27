@@ -418,3 +418,4 @@ main { padding-top: calc(var(--appbar) + var(--safe-t)); padding-bottom: calc(va
 .st-pay { background: #f5a300; color: #fff; }
 .st-ok.st-off { background: var(--card-2); color: var(--ink-3); }
 .settle.is-paid { box-shadow: 0 0 0 1.5px var(--brand), var(--shadow); }
+.flag-emoji { font-size: 20px; line-height: 1; }

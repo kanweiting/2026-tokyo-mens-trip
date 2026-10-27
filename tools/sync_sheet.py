@@ -15,6 +15,7 @@ save = lambda f, o, **k: json.dump(o, open(P(f), 'w', encoding='utf-8'), ensure_
 
 trip = load('data/trip.json'); CFG = trip['sheet']
 AREAS = load('data/areas.json')
+CITY = {'name': '東京', 'nameEn': 'Tokyo', 'center': [35.68, 139.76], 'bbox': [35.5, 139.4, 35.9, 140.0], 'region': 'jp', **(json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'trip.json'), encoding='utf-8')).get('city') or {})}
 base = load('data/src/base_places.json')
 link_cache = load('data/src/link_cache.json', {})
 geo_cache = load('data/src/geocode_cache.json', {})
@@ -29,7 +30,7 @@ def dist_km(a, b, c, d):
 def area_of(lat, lng):
     best = min(AREAS, key=lambda a: dist_km(lat, lng, a['lat'], a['lng']))
     if dist_km(lat, lng, best['lat'], best['lng']) <= max(best.get('r', 1.6), 2.5): return best['name']
-    return '東京其他' if dist_km(lat, lng, 35.68, 139.76) < 30 else '東京以外'
+    c = CITY['center']; return CITY['name'] + ('其他' if dist_km(lat, lng, c[0], c[1]) < 30 else '以外')
 TYPE_RULES = [('Bar/居酒屋', r'bar|居酒屋'), ('咖啡/甜點', r'咖啡|甜點|飲料|麵包|抹茶|早午餐'), ('購物', r'超商|伴手禮')]
 def sheet_type(cat):
     return next((t for t, rx in TYPE_RULES if re.search(rx, (cat or '').lower())), '餐廳')
@@ -52,7 +53,7 @@ def resolve(u):
 def geocode(q):
     if q in geo_cache: return geo_cache[q]
     url = 'https://nominatim.openstreetmap.org/search?' + urllib.parse.urlencode(
-        dict(q=q, format='json', limit=1, countrycodes='jp', viewbox='139.4,35.9,140.0,35.5', bounded=1))
+        dict(q=q, format='json', limit=1, countrycodes=CITY['region'], viewbox=f"{CITY['bbox'][1]},{CITY['bbox'][2]},{CITY['bbox'][3]},{CITY['bbox'][0]}", bounded=1))
     try:
         r = json.load(urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'tokyo-trip-planner/1.0'}), timeout=20))
         geo_cache[q] = [float(r[0]['lat']), float(r[0]['lon'])] if r else None
@@ -114,7 +115,7 @@ for r in rows:
         p['map'] = r['map']; ll = resolve(r['map'])
         if ll: p['lat'], p['lng'], p['approx'] = ll[0], ll[1], False
     if p.get('lat') is None:
-        ll = geocode((r['name_en'] or r['name']) + ' Tokyo')
+        ll = geocode((r['name_en'] or r['name']) + ' ' + CITY['nameEn'])
         if ll: p['lat'], p['lng'], p['approx'] = ll[0], ll[1], False
     p['area'] = area_of(p['lat'], p['lng']) if p.get('lat') is not None else '未定位'
     cm = [c for c in p.get('comments', []) if c.get('src') != 'sheet']

@@ -13,7 +13,7 @@ function json_(o) {
 
 function doGet(e) {
   const op = (e && e.parameter && e.parameter.op) || '';
-  if (op === 'search') return json_({ results: search_(e.parameter.q || '') });
+  if (op === 'search') return json_({ results: search_(e.parameter.q || '', e.parameter) });
   if (op === 'resolve') return json_({ results: resolve_(e.parameter.url || '') });
   const rows = sheet_().getDataRange().getValues().slice(1);
   const records = rows.filter(r => r[0]).map(r => JSON.parse(r[2]));
@@ -46,22 +46,28 @@ function savePhoto_(body) {
 
 // 找地點：有設定 PLACES_KEY（專案設定 → 指令碼屬性）就用 Google Places，拿得到真正的店名和評分；
 // 沒有就用 Apps Script 內建的地理編碼（免費，但只有地址，店名用使用者輸入的字）
-function search_(q) {
-  q = String(q).trim();
-  if (!q) return [];
-  const key = PropertiesService.getScriptProperties().getProperty('PLACES_KEY');
-  return key ? places_(q, key) : geocode_(q);
+// 搜尋範圍：網站會傳 bbox=南,西,北,東、city=城市名、region=國家碼；沒傳就用東京
+function area_(p) {
+  const b = String((p && p.bbox) || '35.5,139.4,35.9,140.0').split(',').map(Number);
+  return { s: b[0], w: b[1], n: b[2], e: b[3], city: (p && p.city) || '東京', region: (p && p.region) || 'jp' };
 }
 
-function places_(q, key) {
+function search_(q, params) {
+  q = String(q).trim();
+  if (!q) return [];
+  const key = PropertiesService.getScriptProperties().getProperty('PLACES_KEY'), a = area_(params);
+  return key ? places_(q, key, a) : geocode_(q, a);
+}
+
+function places_(q, key, a) {
   const r = UrlFetchApp.fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
     headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.types,places.primaryTypeDisplayName,places.googleMapsUri,places.rating,places.userRatingCount' },
-    payload: JSON.stringify({ textQuery: q, languageCode: 'zh-TW', regionCode: 'JP', maxResultCount: 6,
-      locationBias: { rectangle: { low: { latitude: 35.5, longitude: 139.4 }, high: { latitude: 35.9, longitude: 140.0 } } } })
+    payload: JSON.stringify({ textQuery: q, languageCode: 'zh-TW', regionCode: a.region.toUpperCase(), maxResultCount: 6,
+      locationBias: { rectangle: { low: { latitude: a.s, longitude: a.w }, high: { latitude: a.n, longitude: a.e } } } })
   });
   const body = JSON.parse(r.getContentText() || '{}');
-  if (!body.places) return geocode_(q);
+  if (!body.places) return geocode_(q, a);
   return body.places.map(function (p) {
     return { name: p.displayName && p.displayName.text, address: p.formattedAddress, lat: p.location.latitude, lng: p.location.longitude,
       placeId: p.id, types: p.types || [], typeLabel: p.primaryTypeDisplayName && p.primaryTypeDisplayName.text,
@@ -69,10 +75,11 @@ function places_(q, key) {
   });
 }
 
-function geocode_(q) {
-  const g = Maps.newGeocoder().setRegion('jp').setLanguage('zh-TW').setBounds(35.5, 139.4, 35.9, 140.0);
+function geocode_(q, a) {
+  a = a || area_();
+  const g = Maps.newGeocoder().setRegion(a.region).setLanguage('zh-TW').setBounds(a.s, a.w, a.n, a.e);
   const seen = {}, out = [];
-  [q, q + ' 東京'].forEach(function (s) {
+  [q, q + ' ' + a.city].forEach(function (s) {
     (g.geocode(s).results || []).forEach(function (x) {
       if (seen[x.place_id] || out.length >= 6) return;
       seen[x.place_id] = 1;

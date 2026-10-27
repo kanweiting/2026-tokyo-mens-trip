@@ -9,6 +9,7 @@ import json, glob, re, sys, time, math, os, urllib.request, urllib.parse
 RAW = sys.argv[1] if len(sys.argv) > 1 else '../_raw'
 OUT = os.path.join(os.path.dirname(__file__), '..', 'data', 'src', 'base_places.json')   # 之後跑 sync_sheet.py 套上 Sheet 最新內容 → data/places.json
 AREAS = json.load(open(os.path.join(os.path.dirname(__file__), '..', 'data', 'areas.json'), encoding='utf-8'))
+CITY = {'name': '東京', 'nameEn': 'Tokyo', 'center': [35.68, 139.76], 'bbox': [35.5, 139.4, 35.9, 140.0], 'region': 'jp', **(json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'trip.json'), encoding='utf-8')).get('city') or {})}
 
 TYPE_RULES = [  # 依序比對 Sheet 的「餐廳類型」
     ('Bar/居酒屋', r'bar|居酒屋'),
@@ -35,7 +36,7 @@ def area_of(lat, lng):
     best = min(AREAS, key=lambda a: dist_km(lat, lng, a['lat'], a['lng']))
     d = dist_km(lat, lng, best['lat'], best['lng'])
     if d <= max(best.get('r', 1.6), 2.5): return best['name']   # 「一帶」即可，不必在圈內
-    return '東京其他' if dist_km(lat, lng, 35.68, 139.76) < 30 else '東京以外'
+    c = CITY['center']; return CITY['name'] + ('其他' if dist_km(lat, lng, c[0], c[1]) < 30 else '以外')
 
 def area_alias(a):
     a = (a or '').strip()
@@ -49,7 +50,7 @@ cache = json.load(open(cache_p, encoding='utf-8')) if os.path.exists(cache_p) el
 def geocode(q):
     if q in cache: return cache[q]
     url = 'https://nominatim.openstreetmap.org/search?' + urllib.parse.urlencode(
-        dict(q=q, format='json', limit=1, countrycodes='jp', viewbox='139.4,35.9,140.0,35.5', bounded=1))
+        dict(q=q, format='json', limit=1, countrycodes=CITY['region'], viewbox=f"{CITY['bbox'][1]},{CITY['bbox'][2]},{CITY['bbox'][3]},{CITY['bbox'][0]}", bounded=1))
     try:
         r = json.load(urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'tokyo-trip-planner/1.0'}), timeout=20))
         cache[q] = [float(r[0]['lat']), float(r[0]['lon'])] if r else None
@@ -201,7 +202,7 @@ print(f'Threads 新增 {n_th}，Google Maps 清單新增 {n_gm}')
 todo = [p for p in places if p['lat'] is None]
 print(f'IG 地點 {n_ig}，新增 {n_new}，待補座標 {len(todo)}')
 for i, p in enumerate(todo):
-    for q in filter(None, [p.get('address'), p['name_en'] and p['name_en'] + ' Tokyo', p['name']]):
+    for q in filter(None, [p.get('address'), p['name_en'] and p['name_en'] + ' ' + CITY['nameEn'], p['name']]):
         ll = geocode(q)
         ar = area_alias(p.get('hintArea'))
         if ll and ar and dist_km(ll[0], ll[1], ar['lat'], ar['lng']) > 3:

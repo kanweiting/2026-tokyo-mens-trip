@@ -34,6 +34,10 @@ const ICON = {
   arrow: '<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
 };
 
+// 城市／幣別設定（trip.json 的 city、currency；沒寫就用東京＋日圓／台幣）
+const CITY = () => ({ name: '東京', nameEn: 'Tokyo', center: [35.676, 139.72], bbox: [35.5, 139.4, 35.9, 140.0], region: 'jp', ...(trip.city || {}) });
+const CUR = () => ({ local: 'JPY', localSym: '¥', localName: '日圓', home: 'TWD', homeSym: 'NT$', homeName: '台幣', fxSource: '臺灣銀行', ...(trip.currency || {}) });
+let SYM = '¥', HSYM = 'NT$';   // main() 讀完 trip.json 後依 currency 設定
 let trip, places, basePlaces, areas, byId, sheetPlan = { days: {}, wish: {} };
 const S = { me: localStorage.getItem('me') || '', tab: 'plan', day: null, pos: null, records: [], type: '', favOnly: false, mview: 'list', routeDay: null, sel: null };
 
@@ -122,12 +126,13 @@ const memberIdx = id => trip.members.findIndex(m => m.id === id);
 const enName = id => { const m = trip.members.find(x => x.id === id); return m?.en || m?.name || id; };
 const memberName = id => trip.members.find(m => m.id === id)?.name || id;
 const av = (id, cls = '') => { const i = memberIdx(id); return `<span class="av ${cls}" style="--c:var(--m${(i % 5) + 1})">${h((memberName(id) || '?').slice(0, 1).toUpperCase())}</span>`; };
-const mapsUrl = p => p.map || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((p.name_en || p.name) + ' Tokyo')}`;
+const mapsUrl = p => p.map || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((p.name_en || p.name) + ' ' + CITY().nameEn)}`;
 const navUrl = p => p.lat && !p.approx ? `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}&travelmode=transit` : mapsUrl(p);
 const kmText = d => d < 1 ? Math.round(d * 1000) + ' m' : d.toFixed(1) + ' km';
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 1800); }
 function closedDays(p) { const c = p.closed || ''; if (!c || /24HR|\?/.test(c)) return []; return trip.dates.filter(d => c.includes(wd(d))); }
-function nearestArea(lat, lng) { let best = null, bd = 1e9; for (const a of areas) { const d = dist(lat, lng, a.lat, a.lng); if (d < bd) { bd = d; best = a; } } return { area: best, km: bd }; }
+function nearestArea(lat, lng) { let best = null, bd = 1e9;
+  if (!areas.length) { const c = CITY().center; return { area: { name: CITY().name, lat: c[0], lng: c[1] }, km: dist(lat, lng, c[0], c[1]) }; } for (const a of areas) { const d = dist(lat, lng, a.lat, a.lng); if (d < bd) { bd = d; best = a; } } return { area: best, km: bd }; }
 function travel(a, b) { // 直線距離估算交通時間（僅供參考）
   const d = dist(a.lat, a.lng, b.lat, b.lng) * 1.3;
   return d < 1.2 ? { icon: ICON.walk, text: `步行約 ${Math.max(3, Math.round(d / 4.5 * 60))} 分 · ${kmText(d)}` }
@@ -150,13 +155,13 @@ const gType = r => { const t = (r.types || []).join(' ') + ' ' + (r.typeLabel ||
   return /bar|night_club|pub|izakaya|酒/.test(t) ? 'Bar/居酒屋' : /cafe|coffee|bakery|dessert|tea|confectioner|ice_cream|咖啡|甜/.test(t) ? '咖啡/甜點'
     : /restaurant|food|meal|ramen|sushi|餐/.test(t) ? '餐廳' : /store|shop|mall|market|店/.test(t) ? '購物'
     : /tourist|park|museum|gallery|worship|shrine|temple|景/.test(t) ? '景點' : '其他'; };
-const areaFor = (lat, lng) => { const { area, km } = nearestArea(lat, lng); return km <= 2.5 ? area.name : km < 30 ? '東京其他' : '東京以外'; };
+const areaFor = (lat, lng) => { const { area, km } = nearestArea(lat, lng); return area && km <= 2.5 ? area.name : km < 30 ? CITY().name + '其他' : CITY().name + '以外'; };
 async function openGoogleSearch(q) {
   if (!API.url) return toast('要先連上五人同步才能搜尋 Google（右上角頭像設定）');
   const isUrl = /^https?:\/\//.test(q);
   openSheet(`<h2>${isUrl ? '從 Google Maps 連結加入' : '在 Google 地圖搜尋'}</h2><div class="sub">${h(q)}</div><div class="empty" style="margin-top:12px">搜尋中…</div>`);
   let res = [];
-  try { res = (await fetch(`${API.url}?op=${isUrl ? 'resolve&url' : 'search&q'}=${encodeURIComponent(q)}`).then(r => r.json())).results; }
+  try { res = (await fetch(`${API.url}?op=${isUrl ? 'resolve&url' : 'search&q'}=${encodeURIComponent(q)}&bbox=${CITY().bbox.join(',')}&city=${encodeURIComponent(CITY().name)}&region=${CITY().region}`).then(r => r.json())).results; }
   catch (e) { res = null; }
   if (!Array.isArray(res)) return openSheet(`<h2>搜尋功能還沒啟用</h2><div class="sub">請甘到 Apps Script 貼上新版程式碼並「部署 → 管理部署作業 → 新版本」。</div>`);
   const nk = v => String(v || '').toLowerCase().replace(/[\s\W_]+/g, '');
@@ -400,21 +405,22 @@ function openAddPlan(id, rec) {
 
 
 /* ---------- 準備：待辦清單＋記事本（只存在這支手機、每個人各自一份，不同步） ---------- */
-const TODO_TEMPLATE = [
-  { sec: '出發前要辦', items: ['護照（效期還有 6 個月以上）', 'Visit Japan Web 填好入境＋海關，截圖 QR Code', '機票／登機證、航班時間再確認一次', '旅平險／不便險', '網路：eSIM／網卡／漫遊開通', '換日圓現金', '信用卡開通海外刷卡（帶 2 張）', 'Suica／PASMO 加到手機錢包並儲值', 'Airbnb 地址＋入住方式截圖', 'Google Maps 下載東京離線地圖', '已訂位的餐廳再確認時間'] },
-  { sec: '證件與錢包', items: ['護照', '台灣身分證', '日圓＋台幣零錢', '信用卡', '證件影本／照片存手機'] },
-  { sec: '3C 與充電', items: ['手機充電器＋線', '行動電源（只能放隨身行李）', '耳機', '相機／記憶卡（有帶的話）'] },
-  { sec: '衣物（10 月東京約 15–22°C）', items: ['薄外套／防風外套', '長袖上衣', '褲子', '內衣褲、襪子（天數＋1）', '睡衣', '好走的鞋'] },
-  { sec: '盥洗與藥品', items: ['牙刷牙膏（Airbnb 不一定有）', '刮鬍刀', '保養品／隱形眼鏡', '常備藥、腸胃藥、止痛藥'] },
-  { sec: '其他', items: ['折疊傘', '購物袋／可折疊行李袋（裝戰利品）', '原子筆'] },
+const TODO_DEFAULT = [
+  { sec: '出發前要辦', items: ['護照（效期還有 6 個月以上）', '機票／登機證、航班時間再確認一次', '旅平險／不便險', '網路：eSIM／網卡／漫遊', '換當地現金', '信用卡開通海外刷卡', '住宿地址＋入住方式截圖', 'Google Maps 下載離線地圖'] },
+  { sec: '證件與錢包', items: ['護照', '身分證', '當地貨幣＋台幣零錢', '信用卡'] },
+  { sec: '3C 與充電', items: ['手機充電器＋線', '行動電源（只能放隨身行李）', '轉接頭（確認當地插座）'] },
+  { sec: '衣物', items: ['外套', '上衣', '褲子', '內衣褲、襪子（天數＋1）', '睡衣', '好走的鞋'] },
+  { sec: '盥洗與藥品', items: ['牙刷牙膏', '保養品', '常備藥'] },
+  { sec: '其他', items: ['折疊傘', '購物袋／可折疊行李袋'] },
 ];
+const TODO_TEMPLATE = () => trip.todoTemplate || TODO_DEFAULT;
 const Todo = {
   key() { return `todo:${S.me || 'guest'}`; },
   load() {
     const saved = JSON.parse(localStorage.getItem(this.key()) || 'null');
     if (saved) return saved;
     let n = 0;
-    return { secs: TODO_TEMPLATE.map(s => ({ name: s.sec, items: s.items.map(t => ({ id: 't' + (n++), text: t, done: false })) })) };
+    return { secs: TODO_TEMPLATE().map(s => ({ name: s.sec, items: s.items.map(t => ({ id: 't' + (n++), text: t, done: false })) })) };
   },
   save(d) { localStorage.setItem(this.key(), JSON.stringify(d)); },
 };
@@ -509,7 +515,7 @@ function renderPlan() {
   const start = trip.dates[0], end = trip.dates[trip.dates.length - 1], td = today();
   const diff = Math.round((new Date(start) - new Date(td)) / 864e5);
   const cnt = diff > 0 ? `<div class="count">倒數<b>${diff}</b>天</div>` : td <= end ? `<div class="count">今天是<b>D${dayNo(td)}</b></div>` : '<div class="count">旅程<b>完成</b>🎉</div>';
-  $('#hero').innerHTML = `<div class="eyebrow">Tokyo · ${trip.members.length} men</div><h1>${h(trip.title)}</h1><div class="dates">${h(trip.subtitle)}</div>
+  $('#hero').innerHTML = `<div class="eyebrow">${h(trip.eyebrow || CITY().nameEn + ' · ' + trip.members.length + ' people')}</div><h1>${h(trip.title)}</h1><div class="dates">${h(trip.subtitle)}</div>
     <div class="row"><div class="av-stack">${trip.members.map(m => av(m.id)).join('')}</div>${cnt}</div>
     <div class="stats"><span>📍 ${places.length} 個候選</span><span>🗓️ ${plannedIds().size} 個已排</span>${S.me ? `<span>★ 我收藏 ${favsOf(S.me).size}</span>` : ''}${sheetPlan.updated ? `<span>📄 Sheet ${h(fmtTs(sheetPlan.updated))} 更新</span>` : ''}</div>`;
   $('#dayTabs').innerHTML = trip.dates.map(d => `<button class="daytab ${d === S.day ? 'on' : ''} ${d === td ? 'today' : ''}" data-day="${d}"><b>D${dayNo(d)}</b><small>${dayLabel(d)}</small></button>`).join('');
@@ -565,7 +571,7 @@ let map, cluster, routeLayer, meMarker, markers = {}, ignoreMove = false;
 const pinIcon = (p, sel) => { const t = typeOf(p); return L.divIcon({ className: '', iconSize: sel ? [40, 40] : [30, 30], iconAnchor: sel ? [20, 40] : [15, 30],
   html: `<div class="pin ${p.approx ? 'approx' : ''} ${sel ? 'sel' : ''}" style="--c:${css(t.v)}"><span>${t.icon}</span>${isFav(p.id) ? '<b class="pin-star">★</b>' : ''}</div>` }); };
 function initMap() {
-  map = L.map('map', { zoomControl: false, attributionControl: true }).setView([35.676, 139.72], 13);
+  map = L.map('map', { zoomControl: false, attributionControl: true }).setView(CITY().center, 13);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 }).addTo(map);
   const labels = L.layerGroup(areas.map(a => L.marker([a.lat, a.lng], { interactive: false, icon: L.divIcon({ className: '', html: `<div class="area-label">${h(a.name)}</div>`, iconSize: [0, 0] }) })));
   const syncLabels = () => map.getZoom() >= 12 && map.getZoom() <= 15 ? labels.addTo(map) : labels.remove();
@@ -736,10 +742,10 @@ function fxOn(date) {
 const SETTLE_DAY = () => trip.dates[trip.dates.length - 1];
 const dOf = e => (e.at || '').slice(0, 10);
 const toBase = (amt, cur, date) => cur === trip.baseCurrency ? amt : amt / fxOn(date).rate;   // → 日圓
-const toTwd = (amt, cur, date) => cur === 'TWD' ? amt : amt * fxOn(date).rate;              // → 台幣
+const toTwd = (amt, cur, date) => cur === CUR().home ? amt : amt * fxOn(date).rate;          // → 本國貨幣
 const presentOn = (id, date) => { const m = trip.members.find(x => x.id === id); return !date || ((!m.from || date >= m.from) && (!m.until || date <= m.until)); };
-const curSym = c => c === 'JPY' ? '¥' : c === 'TWD' ? 'NT$' : c + ' ';
-const twd = (v, date) => `≈ NT$${fmt(toTwd(v, 'JPY', date || SETTLE_DAY()))}`;
+const curSym = c => c === CUR().local ? CUR().localSym : c === CUR().home ? CUR().homeSym : c + ' ';
+const twd = (v, date) => `≈ ${HSYM}${fmt(toTwd(v, CUR().local, date || SETTLE_DAY()))}`;
 function norm(e) { // 相容舊格式
   return { ...e, at: e.at || (e.date ? e.date + 'T12:00' : (e.createdAt || e.ts || '').slice(0, 16)), people: e.people || e.split || trip.members.map(m => m.id),
     mode: e.mode || 'equal', cat: e.cat || 'other', shares: e.shares || {} };
@@ -768,12 +774,12 @@ function ledger() {
 }
 function renderMoney() {
   const L0 = ledger(), me = S.me;
-  $('#moneyHero').innerHTML = `<div class="k">團體總花費</div><div class="v">¥${fmt(L0.total)}<small>≈ NT$${fmt(L0.totalTwd)}</small></div>
+  $('#moneyHero').innerHTML = `<div class="k">團體總花費</div><div class="v">${SYM}${fmt(L0.total)}<small>≈ ${HSYM}${fmt(L0.totalTwd)}</small></div>
     <div class="grid3">
-      <div><span class="k">${me ? '我付了' : '筆數'}</span><b>${me ? '¥' + fmt(L0.paid[me]) : L0.ex.length}</b></div>
-      <div><span class="k">${me ? '我的花費' : '人均'}</span><b>¥${fmt(me ? L0.share[me] : L0.total / trip.members.length)}</b></div>
+      <div><span class="k">${me ? '我付了' : '筆數'}</span><b>${me ? SYM + fmt(L0.paid[me]) : L0.ex.length}</b></div>
+      <div><span class="k">${me ? '我的花費' : '人均'}</span><b>${SYM}${fmt(me ? L0.share[me] : L0.total / trip.members.length)}</b></div>
       ${me && Math.abs(L0.bal[me]) < 1 ? '<div><span class="k">我的帳</span><b class="pos">已結清 ✓</b></div>'
-        : `<div><span class="k">${me ? (L0.bal[me] >= 0 ? '我應收' : '我應付') : '待結清'}</span><b class="${me ? (L0.bal[me] >= 0 ? 'pos' : 'neg') : ''}">${me ? '¥' + fmt(Math.abs(L0.bal[me])) : L0.tx.length + ' 筆'}</b></div>`}
+        : `<div><span class="k">${me ? (L0.bal[me] >= 0 ? '我應收' : '我應付') : '待結清'}</span><b class="${me ? (L0.bal[me] >= 0 ? 'pos' : 'neg') : ''}">${me ? SYM + fmt(Math.abs(L0.bal[me])) : L0.tx.length + ' 筆'}</b></div>`}
     </div>`;
   $$('#moneySeg button').forEach(b => b.classList.toggle('on', b.dataset.mview === S.mview));
   const body = $('#moneyBody');
@@ -781,23 +787,23 @@ function renderMoney() {
     if (!L0.ex.length) return (body.innerHTML = '<div class="empty">還沒有任何一筆<br><span class="small">按右下角 ＋ 開始記帳</span></div>');
     const groups = {}; L0.ex.forEach(e => (groups[e.at.slice(0, 10)] ||= []).push(e));
     const sub = es => es.reduce((s, e) => s + toBase(+e.amount, e.currency, dOf(e)), 0), mySub = es => me ? es.reduce((s, e) => s + (owed(e)[me] || 0), 0) : 0;
-    body.innerHTML = Object.entries(groups).map(([d, es]) => `<div class="day-group"><span>${trip.dates.includes(d) ? `D${dayNo(d)} · ` : ''}${dayLabel(d)} · ${es.length} 筆</span><span>小計 ¥${fmt(sub(es))}${me ? `<small> · 我 ¥${fmt(mySub(es))}</small>` : ''}</span></div>` +
+    body.innerHTML = Object.entries(groups).map(([d, es]) => `<div class="day-group"><span>${trip.dates.includes(d) ? `D${dayNo(d)} · ` : ''}${dayLabel(d)} · ${es.length} 筆</span><span>小計 ${SYM}${fmt(sub(es))}${me ? `<small> · 我 ${SYM}${fmt(mySub(es))}</small>` : ''}</span></div>` +
       es.map(e => { const c = CAT[e.cat] || CAT.other, mine = me ? owed(e)[me] || 0 : null;
         return `<button class="exp" data-exp="${e.id}"><div class="icon-tile sm" style="--c:var(--seq)">${c.icon}</div>
           <div class="body"><div class="t">${e.photo ? '📷 ' : ''}${h(e.title)}</div><div class="s">${e.at.slice(11, 16)} · ${h(memberName(e.payer))} 付 · ${e.people.length === trip.members.length ? '全部人' : e.people.length + ' 人'}${{ ratio: '·比例', amount: '·指定金額' }[e.mode] || ''}</div></div>
-          <div class="amt">${curSym(e.currency)}${fmt(+e.amount)}${e.currency !== 'JPY' ? `<small class="muted">≈ ¥${fmt(toBase(+e.amount, e.currency, dOf(e)))} · ${fxOn(dOf(e)).rate}</small>` : ''}${mine != null ? `<small class="${mine ? '' : 'muted'}">${mine ? '我 ¥' + fmt(mine) : '與我無關'}</small>` : ''}</div></button>`; }).join('')).join('') +
-      `<div class="grand"><span>總計 · ${L0.ex.length} 筆</span><b>¥${fmt(L0.total)}</b><small>≈ NT$${fmt(L0.totalTwd)}（每筆用當天台銀匯率）${me ? ` · 我 ¥${fmt(L0.share[me])}` : ''}</small></div>`;
+          <div class="amt">${curSym(e.currency)}${fmt(+e.amount)}${e.currency !== CUR().local ? `<small class="muted">≈ ${SYM}${fmt(toBase(+e.amount, e.currency, dOf(e)))} · ${fxOn(dOf(e)).rate}</small>` : ''}${mine != null ? `<small class="${mine ? '' : 'muted'}">${mine ? '我 ¥' + fmt(mine) : '與我無關'}</small>` : ''}</div></button>`; }).join('')).join('') +
+      `<div class="grand"><span>總計 · ${L0.ex.length} 筆</span><b>${SYM}${fmt(L0.total)}</b><small>≈ ${HSYM}${fmt(L0.totalTwd)}（每筆用當天台銀匯率）${me ? ` · 我 ${SYM}${fmt(L0.share[me])}` : ''}</small></div>`;
   } else if (S.mview === 'daily') {
     const days = [...new Set([...trip.dates, ...L0.ex.map(e => e.at.slice(0, 10))])].sort(), ms = trip.members;
     const cell = (d, id) => L0.ex.filter(e => e.at.slice(0, 10) === d).reduce((s, e) => s + (id ? owed(e)[id] || 0 : toBase(+e.amount, e.currency, dOf(e))), 0);
-    body.innerHTML = `<div class="panel" style="margin-top:0"><div class="panel-head"><h3>每日小計</h3><span class="muted small">每人＝應負擔金額（¥）</span></div>
+    body.innerHTML = `<div class="panel" style="margin-top:0"><div class="panel-head"><h3>每日小計</h3><span class="muted small">每人＝應負擔金額（${SYM}）</span></div>
       <div class="matrix"><table class="daily"><tr><th>日期</th>${ms.map(m => `<th>${av(m.id)}</th>`).join('')}<th>小計</th></tr>
       ${days.map(d => `<tr><td>${trip.dates.includes(d) ? `<b>D${dayNo(d)}</b> ` : ''}${md(d)}<div class="fx-cell">匯率 ${fxOn(d).rate}</div></td>${ms.map(m => { const v = cell(d, m.id); return `<td class="${v ? '' : 'muted'}">${v ? fmt(v) : '–'}</td>`; }).join('')}<td><b>${fmt(cell(d))}</b></td></tr>`).join('')}
       <tr class="total"><td>總計</td>${ms.map(m => `<td>${fmt(L0.share[m.id])}</td>`).join('')}<td>${fmt(L0.total)}</td></tr></table></div>
-      <div class="muted small" style="margin-top:8px">總計 ¥${fmt(L0.total)}（≈ NT$${fmt(L0.totalTwd)}）<br>匯率＝1 日圓兌台幣，臺灣銀行當天即期買賣中間價的平均；週末沿用前一營業日。台幣記的帳也用當天匯率換成日圓分攤。</div></div>`;
+      <div class="muted small" style="margin-top:8px">總計 ${SYM}${fmt(L0.total)}（≈ ${HSYM}${fmt(L0.totalTwd)}）<br>匯率＝1 ${CUR().localName}兌${CUR().homeName}，${CUR().fxSource}當天匯率；沒有牌價的日子沿用前一營業日。${CUR().homeName}記的帳也用當天匯率換成${CUR().localName}分攤。</div></div>`;
   } else if (S.mview === 'settle') {
     const sd = SETTLE_DAY(), fxs = fxOn(sd);
-    body.innerHTML = `<div class="sec-head"><h3>結清建議</h3><span>最少轉帳次數 · 台幣用 ${h(fxs.src)} ${fxs.rate}</span></div>` +
+    body.innerHTML = `<div class="sec-head"><h3>結清建議</h3><span>最少轉帳次數 · ${CUR().homeName}用 ${h(fxs.src)} ${fxs.rate}</span></div>` +
       (() => {
         // 每列＝一筆建議轉帳；如果還款人已經按了「已還款」就帶上那筆紀錄（金額以按下時為準）
         const paids = Store.of('paid'), used = new Set();
@@ -810,21 +816,21 @@ function renderMoney() {
           const status = pd ? `<span class="st-tag paid">💸 ${h(memberName(a))} ${h(fmtTs(pd.ts))} 已還款 · 待 ${h(memberName(b))} 核銷</span>`
             : `<span class="st-tag">⏳ 待 ${h(memberName(a))} 還款</span>`;
           return `<div class="settle ${pd ? 'is-paid' : ''}">${av(a)}<b>${h(memberName(a))}</b><span class="arrow">${ICON.arrow}</span>${av(b)}<b>${h(memberName(b))}</b>
-            <div class="amt">¥${fmt(show)}<small>${twd(show)}</small></div>
+            <div class="amt">${SYM}${fmt(show)}<small>${twd(show)}</small></div>
             <div class="st-row">${status}<span class="st-btns">${payBtn}${okBtn}</span></div></div>`; }).join('');
       })() +
       (L0.settles.length ? `<div class="sec-head"><h3>已核銷</h3><span>${L0.settles.length} 筆</span></div>` + L0.settles.map(st =>
         `<div class="settle done">${av(st.from)}<b>${h(memberName(st.from))}</b><span class="arrow">${ICON.arrow}</span>${av(st.to)}<b>${h(memberName(st.to))}</b>
-        <div class="amt">¥${fmt(+st.amount)}<small>${st.paidAt ? `💸 ${h(memberName(st.from))} ${h(fmtTs(st.paidAt))} 還款 · ` : ''}✓ ${h(memberName(st.to))} ${h(fmtTs(st.ts))} 核銷</small></div>
+        <div class="amt">${SYM}${fmt(+st.amount)}<small>${st.paidAt ? `💸 ${h(memberName(st.from))} ${h(fmtTs(st.paidAt))} 還款 · ` : ''}✓ ${h(memberName(st.to))} ${h(fmtTs(st.ts))} 核銷</small></div>
         ${me === st.to ? `<button class="mini" data-unsettle="${h(st.id)}">取消</button>` : ''}</div>`).join('') : '') +
       `<div class="sec-head"><h3>每人收支</h3><span>付出 − 應負擔</span></div><div class="panel" style="margin-top:0">` +
-      trip.members.map(m => `<div class="bal">${av(m.id)}<div><b>${h(m.name)}</b><div class="muted small">付 ¥${fmt(L0.paid[m.id])} · 花 ¥${fmt(L0.share[m.id])}</div></div>
-        <div class="amt ${L0.bal[m.id] >= 0 ? 'pos' : 'neg'}">${L0.bal[m.id] >= 0 ? '+' : '−'}¥${fmt(Math.abs(L0.bal[m.id]))}</div></div>`).join('') + '</div>';
+      trip.members.map(m => `<div class="bal">${av(m.id)}<div><b>${h(m.name)}</b><div class="muted small">付 ${SYM}${fmt(L0.paid[m.id])} · 花 ${SYM}${fmt(L0.share[m.id])}</div></div>
+        <div class="amt ${L0.bal[m.id] >= 0 ? 'pos' : 'neg'}">${L0.bal[m.id] >= 0 ? '+' : '−'}${SYM}${fmt(Math.abs(L0.bal[m.id]))}</div></div>`).join('') + '</div>';
   } else {
     const byCat = CATS.map(c => ({ c, v: L0.ex.filter(e => e.cat === c.id).reduce((s, e) => s + toBase(+e.amount, e.currency, dOf(e)), 0) })).filter(x => x.v).sort((a, b) => b.v - a.v);
     const mx = byCat[0]?.v || 1;
     body.innerHTML = `<div class="panel" style="margin-top:0"><div class="panel-head"><h3>花費分類</h3><span class="muted small">團體合計</span></div>` +
-      (byCat.map(x => `<div class="catbar" data-tip="${x.c.name}：¥${fmt(x.v)}（${Math.round(x.v / L0.total * 100)}%）"><span>${x.c.icon} ${x.c.name}</span><div class="track"><div class="fill" style="width:${x.v / mx * 100}%"></div></div><span class="v">¥${fmt(x.v)}</span></div>`).join('') || '<div class="muted">還沒有資料</div>') + '</div>';
+      (byCat.map(x => `<div class="catbar" data-tip="${x.c.name}：${SYM}${fmt(x.v)}（${Math.round(x.v / L0.total * 100)}%）"><span>${x.c.icon} ${x.c.name}</span><div class="track"><div class="fill" style="width:${x.v / mx * 100}%"></div></div><span class="v">${SYM}${fmt(x.v)}</span></div>`).join('') || '<div class="muted">還沒有資料</div>') + '</div>';
   }
 }
 
@@ -832,14 +838,14 @@ function openExpense(id) {
   const old = id ? norm(Store.of('exp').find(r => r.id === id)) : null;
   const at0 = old?.at || nowLocal();
   const F = old ? { ...old, shares: { ...old.shares }, people: [...old.people], preview: null, ocrMsg: '' } : {
-    amount: '', currency: Pref.get('cur', 'JPY'), title: '', cat: 'food', at: at0, payer: S.me || trip.members[0].id,
+    amount: '', currency: Pref.get('cur', CUR().local), title: '', cat: 'food', at: at0, payer: S.me || trip.members[0].id,
     people: trip.members.filter(m => presentOn(m.id, at0.slice(0, 10))).map(m => m.id), mode: 'equal', shares: {} };
   let touchedPeople = !!old;
   const total = () => +F.amount || 0;
   const defaults = () => { if (F.mode === 'ratio') F.people.forEach(i => F.shares[i] = F.shares[i] || 1);
     if (F.mode === 'amount') { const t = total(), each = Math.floor(t / (F.people.length || 1)); F.people.forEach((i, k) => F.shares[i] = k === 0 ? t - each * (F.people.length - 1) : each); } };
   const fxHint = () => { const d = (F.at || '').slice(0, 10), fx = fxOn(d), a = +F.amount || 0;
-    return `${a ? (F.currency === 'JPY' ? `≈ NT$${fmt(toTwd(a, 'JPY', d))}` : `≈ ¥${fmt(toBase(a, 'TWD', d))}`) + ' · ' : ''}匯率 1 日圓 = ${fx.rate} 台幣（${h(fx.src)}）`; };
+    return `${a ? (F.currency === CUR().local ? `≈ ${HSYM}${fmt(toTwd(a, CUR().local, d))}` : `≈ ${SYM}${fmt(toBase(a, CUR().home, d))}`) + ' · ' : ''}匯率 1 ${CUR().localName} = ${fx.rate} ${CUR().homeName}（${h(fx.src)}）`; };
   const calcHtml = () => {
     const t = total(), n = F.people.length || 1;
     if (F.mode === 'equal') return `<div class="split-sum"><span>${F.people.length} 人均分</span><b>每人 ${curSym(F.currency)}${fmt(t / n)}</b></div>`;
@@ -860,7 +866,7 @@ function openExpense(id) {
       <div class="rc-body"><label class="btn-soft rc-btn">📷 ${F.preview || F.photo ? '換一張收據' : '拍收據／上傳照片，自動帶入金額和時間'}<input type="file" id="fPhoto" accept="image/*" hidden></label>
         ${F.ocrMsg ? `<div class="small ${F.ocrBad ? 'neg' : 'muted'}">${h(F.ocrMsg)}</div>` : ''}</div>
     </div>
-    <div class="seg" data-g="currency">${['JPY', 'TWD'].map(c => `<button class="${F.currency === c ? 'on' : ''}" data-v="${c}">${c === 'JPY' ? '¥ 日圓' : 'NT$ 台幣'}</button>`).join('')}</div>
+    <div class="seg" data-g="currency">${[CUR().local, CUR().home].map(c => `<button class="${F.currency === c ? 'on' : ''}" data-v="${c}">${c === CUR().local ? CUR().localSym + ' ' + CUR().localName : CUR().homeSym + ' ' + CUR().homeName}</button>`).join('')}</div>
     <div class="field"><label for="fTitle">這次是什麼</label><input class="input" id="fTitle" placeholder="例：Peter Luger 午餐、Suica 加值" value="${h(F.title)}" maxlength="40"></div>
     <div class="field"><span class="field-label">類別</span><div class="cat-grid">${CATS.map(c => `<button class="cat-btn ${F.cat === c.id ? 'on' : ''}" data-cat="${c.id}"><i>${c.icon}</i>${c.name}</button>`).join('')}</div></div>
     <div class="field"><label for="fAt">消費時間</label><input class="input" id="fAt" type="datetime-local" value="${h(F.at)}"></div>
@@ -891,7 +897,7 @@ function openExpense(id) {
         const big = await fileToCanvas(file, 1800);
         const { data } = await Tesseract.recognize(big, 'jpn+eng', { logger: m => { if (m.status === 'recognizing text') { const s = el.querySelector('.rc-body .small'); if (s) s.textContent = `辨識中… ${Math.round(m.progress * 100)}%`; } } });
         const r = parseReceipt(data.text || ''), got = [];
-        if (r.amount) { F.amount = String(r.amount); F.currency = 'JPY'; got.push(`合計 ¥${fmt(r.amount)}`); if (F.mode === 'amount') defaults(); }
+        if (r.amount) { F.amount = String(r.amount); F.currency = CUR().local; got.push(`合計 ${SYM}${fmt(r.amount)}`); if (F.mode === 'amount') defaults(); }
         if (r.at && typeof r.at === 'string') { F.at = r.at; got.push(`時間 ${md(r.at)} ${r.at.slice(11)}`); }
         else if (r.at?.timeOnly) { F.at = F.at.slice(0, 11) + r.at.timeOnly; got.push(`時間 ${r.at.timeOnly}`); }
         F.ocrMsg = got.length ? `✓ 已帶入 ${got.join('、')}，請確認是否正確` : '沒辨識到金額或時間，請手動輸入（照片一樣會存起來）'; F.ocrBad = !got.length;
@@ -993,7 +999,7 @@ function bind() {
     const pay = e.target.closest('[data-paid]'), unpay = e.target.closest('[data-unpaid]');
     if (pay) { const [from, to, amount] = pay.dataset.paid.split('|');
       if (S.me !== from) return toast('只有還款的人可以按「已還款」');
-      if (!confirm(`確認已經轉 ¥${fmt(+amount)} 給 ${memberName(to)}？\n按下後 ${memberName(to)} 就可以核銷`)) return;
+      if (!confirm(`確認已經轉 ${SYM}${fmt(+amount)} 給 ${memberName(to)}？\n按下後 ${memberName(to)} 就可以核銷`)) return;
       await Store.put({ kind: 'paid', from, to, amount: +amount }); toast(`已通知 ${memberName(to)} 核銷`); return renderMoney(); }
     if (unpay) { const pd = Store.of('paid').find(x => x.id === unpay.dataset.unpaid);
       if (!pd || S.me !== pd.from) return toast('只有還款的人可以取消');
@@ -1003,11 +1009,11 @@ function bind() {
       if (S.me !== to) return toast('只有收款的人可以核銷');
       const pd = Store.of('paid').find(x => x.id === ok.dataset.pid);
       if (!pd) return alert(`${memberName(from)} 還沒按「已還款」。\n等 ${memberName(from)} 轉帳並按下「已還款」後，才能核銷。`);
-      if (!confirm(`確認已經收到 ${memberName(from)} 轉來的 ¥${fmt(+amount)}？`)) return;
+      if (!confirm(`確認已經收到 ${memberName(from)} 轉來的 ${SYM}${fmt(+amount)}？`)) return;
       await Store.put({ kind: 'settle', from, to, amount: +amount, paidAt: pd.ts }); await Store.del(pd.id); toast('已核銷 ✓'); return renderMoney(); }
     if (un) { const st = Store.of('settle').find(x => x.id === un.dataset.unsettle);
       if (!st || S.me !== st.to) return toast('只有收款的人可以取消');
-      if (!confirm(`取消這筆核銷（${memberName(st.from)} → ${memberName(st.to)} ¥${fmt(+st.amount)}）？`)) return;
+      if (!confirm(`取消這筆核銷（${memberName(st.from)} → ${memberName(st.to)} ${SYM}${fmt(+st.amount)}）？`)) return;
       await Store.del(st.id); toast('已取消核銷'); renderMoney(); }
   });
   $('#moneySeg').onclick = e => { const b = e.target.closest('[data-mview]'); if (b) { S.mview = b.dataset.mview; renderMoney(); } };
@@ -1045,7 +1051,8 @@ async function main() {
   [trip, basePlaces, areas, sheetPlan] = await Promise.all([j(CFG.tripFile), j(CFG.placesFile), j(CFG.areasFile),
     j(CFG.sheetPlanFile || 'data/sheet_plan.json').catch(() => ({ days: {}, wish: {} }))]);
   mergeUserPlaces();
-  document.title = trip.title; $('#appTitle').innerHTML = `<svg class="jp-flag" viewBox="0 0 30 20" aria-label="日本"><rect width="30" height="20" rx="2" fill="#fff"/><circle cx="15" cy="10" r="6" fill="#e60033"/></svg>${h(trip.short || trip.title)}`;
+  document.title = trip.title; $('#appTitle').innerHTML = `${trip.city?.flagSvg || (trip.city?.flag ? `<span class="flag-emoji">${h(trip.city.flag)}</span>` : '')}${h(trip.short || trip.title)}`;
+  SYM = CUR().localSym; HSYM = CUR().homeSym;
   S.tab = Pref.get('tab', 'plan');
   renderMe(); fillFilters(); bind(); bindPrep();
   await Store.load(); renderSync(); mergeUserPlaces();
