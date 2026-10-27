@@ -88,6 +88,7 @@ def find(n1, n2):
 
 # IG／Threads 顯示名稱 → trip.json 成員 id（在成員的 aliases 列出他在 IG 上的名字，可以有好幾個）
 _TRIP = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'trip.json'), encoding='utf-8'))
+LIKER = os.environ.get('THREADS_OWNER') or _TRIP['members'][0]['id']   # Threads 匯出檔是誰的（成員 id）
 NICK = {a: m['id'] for m in _TRIP['members'] for a in m.get('aliases', [])}
 SHORT = lambda s: NICK.get(s) or next((mid for a, mid in NICK.items() if a and a in s), s)
 def excerpt(cap, names):
@@ -156,7 +157,7 @@ for f in sorted(glob.glob(os.path.join(RAW, 'ig_places_*.json'))):
             else:
                 add_comment(p, dict(src='ig', by=by, url=url, text=excerpt(cap.get('caption'), [q.get('name'), q.get('name_en'), p['name'], p['name_en']])))
 
-# ---------- Threads（Jerry 按讚過的貼文，subagent 抽成 threads_places_*.json） ----------
+# ---------- Threads（自己按讚過的貼文，subagent 抽成 threads_places_*.json） ----------
 n_th = 0
 for f in sorted(glob.glob(os.path.join(RAW, 'threads_places_*.json'))):
     for post in json.load(open(f, encoding='utf-8')):
@@ -169,7 +170,7 @@ for f in sorted(glob.glob(os.path.join(RAW, 'threads_places_*.json'))):
             if 'threads' not in p['src']: p['src'].append('threads')
             p.setdefault('threads', [])
             if url and url not in p['threads']: p['threads'].append(url)
-            if 'jerry' not in p.setdefault('likedBy', []): p['likedBy'].append('jerry')
+            if LIKER and LIKER not in p.setdefault('likedBy', []): p['likedBy'].append(LIKER)
             if not p.get('note') and q.get('note'): p['note'] = q['note']
             add_comment(p, dict(src='threads', by='@' + post.get('author', 'threads'), url=url, text=q.get('quote', '')))
 

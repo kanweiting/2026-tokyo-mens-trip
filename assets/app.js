@@ -104,7 +104,7 @@ const Store = {
 };
 function syncText() {
   const n = Store.pending().length;
-  return { local: '⚪ 只存在這支手機 · 點右上角設定同步', ok: `🟢 五人同步中 · ${Store.last ? Store.last.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : ''} 更新`,
+  return { local: '⚪ 只存在這支手機 · 點右上角設定同步', ok: `🟢 ${trip.members.length} 人同步中 · ${Store.last ? Store.last.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : ''} 更新`,
     pending: `🟡 ${n} 筆等待上傳（網路恢復會自動補傳）`, offline: '🔴 連不到同步伺服器，先用手機裡的資料' }[Store.state] || '';
 }
 function renderSync() { const el = $('#syncState'); if (el) el.textContent = syncText(); }
@@ -157,13 +157,13 @@ const gType = r => { const t = (r.types || []).join(' ') + ' ' + (r.typeLabel ||
     : /tourist|park|museum|gallery|worship|shrine|temple|景/.test(t) ? '景點' : '其他'; };
 const areaFor = (lat, lng) => { const { area, km } = nearestArea(lat, lng); return area && km <= 2.5 ? area.name : km < 30 ? CITY().name + '其他' : CITY().name + '以外'; };
 async function openGoogleSearch(q) {
-  if (!API.url) return toast('要先連上五人同步才能搜尋 Google（右上角頭像設定）');
+  if (!API.url) return toast(`要先連上 ${trip.members.length} 人同步才能搜尋 Google（右上角頭像設定）`);
   const isUrl = /^https?:\/\//.test(q);
   openSheet(`<h2>${isUrl ? '從 Google Maps 連結加入' : '在 Google 地圖搜尋'}</h2><div class="sub">${h(q)}</div><div class="empty" style="margin-top:12px">搜尋中…</div>`);
   let res = [];
   try { res = (await fetch(`${API.url}?op=${isUrl ? 'resolve&url' : 'search&q'}=${encodeURIComponent(q)}&bbox=${CITY().bbox.join(',')}&city=${encodeURIComponent(CITY().name)}&region=${CITY().region}`).then(r => r.json())).results; }
   catch (e) { res = null; }
-  if (!Array.isArray(res)) return openSheet(`<h2>搜尋功能還沒啟用</h2><div class="sub">請甘到 Apps Script 貼上新版程式碼並「部署 → 管理部署作業 → 新版本」。</div>`);
+  if (!Array.isArray(res)) return openSheet(`<h2>搜尋功能還沒啟用</h2><div class="sub">請管理後台的人到 Apps Script 貼上新版程式碼並「部署 → 管理部署作業 → 新版本」。</div>`);
   const nk = v => String(v || '').toLowerCase().replace(/[\s\W_]+/g, '');
   const same = (a, b) => { a = nk(a); b = nk(b); return a.length >= 2 && b.length >= 2 && (a.includes(b) || b.includes(a)); };
   const near = r => places.find(p => p.lat && dist(p.lat, p.lng, r.lat, r.lng) < 0.15 && (same(p.name, r.name) || same(p.name_en, r.name)));
@@ -197,7 +197,7 @@ function openAddUserPlace(r, q) {
         const rec = await Store.put({ kind: 'place', data: { name: F.name.trim(), name_en: '', type: F.type, subcat: F.subcat.trim(), note, address: r.address || '',
           lat: r.lat, lng: r.lng, approx: false, map: r.map || '', area: areaFor(r.lat, r.lng), closed: '', rating: r.rating || null, ratingCount: r.ratingCount || null,
           comments: note ? [{ src: 'user', by: memberName(S.me), text: note }] : [] } });
-        mergeUserPlaces(); toast('已加進清單，五個人都看得到'); render(); openPlace('u_' + rec.id);
+        mergeUserPlaces(); toast('已加進清單，大家都看得到'); render(); openPlace('u_' + rec.id);
       };
     });
   draw();
@@ -314,9 +314,9 @@ function pickMe() {
   const invite = API.url ? location.origin + location.pathname + '#api=' + encodeURIComponent(API.url) : '';
   openSheet(`<h2>你是哪一位？</h2><div class="sub">收藏、地圖篩選、記帳預設付款人都會跟著你。</div>
     <div class="me-list">${trip.members.map(m => `<button data-me="${m.id}" class="${m.id === S.me ? 'on' : ''}">${av(m.id, 'lg')}${h(m.en || m.name)}</button>`).join('')}</div>
-    <div class="sec-head"><h3>五人同步</h3><span>${h(syncText())}</span></div>
+    <div class="sec-head"><h3>${trip.members.length} 人同步</h3><span>${h(syncText())}</span></div>
     ${CFG.sheetApi ? '<div class="sub">已內建同步，打開網站就會自動連上，不用設定。</div>' : `
-    <div class="field"><label for="apiUrl">貼上邀請連結（或 Apps Script 網址）</label><input class="input" id="apiUrl" placeholder="https://kanweiting.github.io/...#api=..." value="${h(API.url)}"></div>
+    <div class="field"><label for="apiUrl">貼上邀請連結（或 Apps Script 網址）</label><input class="input" id="apiUrl" placeholder="https://…/#api=… 或 https://script.google.com/…/exec" value="${h(API.url)}"></div>
     <div class="row2"><button class="btn ghost" data-saveapi>儲存</button><button class="btn ghost" data-invite ${invite ? '' : 'disabled'}>複製邀請連結</button></div>
     <div class="muted small" style="margin-top:8px">把邀請連結傳到群組，大家點一次就會自動連上同一份帳本。</div>`}`,
     el => {
@@ -497,7 +497,7 @@ function renderDaySummary() {
 function openSummary() {
   const d = S.day, rec = Store.of('summary').find(r => r.date === d) || {};
   const F = { owner: rec.owner || '', text: rec.text || '' };
-  const draw = () => openSheet(`<h2>D${dayNo(d)} ${dayLabel(d)} 今日重點</h2><div class="sub">五個人都看得到；誰都可以改</div>
+  const draw = () => openSheet(`<h2>D${dayNo(d)} ${dayLabel(d)} 今日重點</h2><div class="sub">大家都看得到；誰都可以改</div>
     <div class="field"><span class="field-label">今天的負責人</span><div class="people">${trip.members.map(m => `<button class="person ${F.owner === m.id ? 'on' : ''}" data-own="${m.id}">${av(m.id)}${h(m.name)}</button>`).join('')}</div></div>
     <div class="field"><label for="sumText">重點</label><textarea id="sumText" class="memo" style="min-height:180px" placeholder="例：&#10;・10:30 在新宿站東口集合&#10;・午餐 Peter Luger 已訂位，11:00 前到&#10;・下午自由活動，18:00 回住宿">${h(F.text)}</textarea></div>
     <div class="form-foot"><button class="btn" data-save>儲存</button>${rec.id ? '<button class="btn danger" data-del>清除今日重點</button>' : ''}</div>`, el => {
@@ -515,6 +515,7 @@ function renderPlan() {
   const start = trip.dates[0], end = trip.dates[trip.dates.length - 1], td = today();
   const diff = Math.round((new Date(start) - new Date(td)) / 864e5);
   const cnt = diff > 0 ? `<div class="count">倒數<b>${diff}</b>天</div>` : td <= end ? `<div class="count">今天是<b>D${dayNo(td)}</b></div>` : '<div class="count">旅程<b>完成</b>🎉</div>';
+  $('#hero').dataset.emoji = trip.city?.heroEmoji || '✈️';
   $('#hero').innerHTML = `<div class="eyebrow">${h(trip.eyebrow || CITY().nameEn + ' · ' + trip.members.length + ' people')}</div><h1>${h(trip.title)}</h1><div class="dates">${h(trip.subtitle)}</div>
     <div class="row"><div class="av-stack">${trip.members.map(m => av(m.id)).join('')}</div>${cnt}</div>
     <div class="stats"><span>📍 ${places.length} 個候選</span><span>🗓️ ${plannedIds().size} 個已排</span>${S.me ? `<span>★ 我收藏 ${favsOf(S.me).size}</span>` : ''}${sheetPlan.updated ? `<span>📄 Sheet ${h(fmtTs(sheetPlan.updated))} 更新</span>` : ''}</div>`;
@@ -699,7 +700,7 @@ function renderList() {
   const L2 = base.filter(p => !S.type || p.type === S.type).sort((a, b) => { const x = key(a), y = key(b); return x < y ? -1 : x > y ? 1 : 0; });
   $('#listCount').textContent = `${L2.length} 個地點${fs === 'dist' && !S.pos ? ' · 還沒定位（到地圖按 ◎）' : ''}`;
   const raw = $('#q').value.trim(), isUrl = /^https?:\/\//.test(raw);
-  const g = raw ? `<button class="gsearch" data-gsearch><span class="gs-ic">🔎</span><span><b>${isUrl ? '用這個 Google Maps 連結新增地點' : `在 Google 地圖搜尋「${h(raw)}」`}</b><small>清單裡沒有？找到後可以加進來，五個人都看得到</small></span></button>` : '';
+  const g = raw ? `<button class="gsearch" data-gsearch><span class="gs-ic">🔎</span><span><b>${isUrl ? '用這個 Google Maps 連結新增地點' : `在 Google 地圖搜尋「${h(raw)}」`}</b><small>清單裡沒有？找到後可以加進來，大家都看得到</small></span></button>` : '';
   $('#list').innerHTML = ((isUrl ? '' : L2.slice(0, 150).map(p => pcard(p)).join('')) + g) || '<div class="empty">沒有符合的地點</div>';
 }
 

@@ -247,7 +247,8 @@
       "Tokyo",
       "東京都"
     ],
-    "flagSvg": "<svg class=\"jp-flag\" viewBox=\"0 0 30 20\" aria-label=\"日本\"><rect width=\"30\" height=\"20\" rx=\"2\" fill=\"#fff\"/><circle cx=\"15\" cy=\"10\" r=\"6\" fill=\"#e60033\"/></svg>"
+    "flagSvg": "<svg class=\"jp-flag\" viewBox=\"0 0 30 20\" aria-label=\"日本\"><rect width=\"30\" height=\"20\" rx=\"2\" fill=\"#fff\"/><circle cx=\"15\" cy=\"10\" r=\"6\" fill=\"#e60033\"/></svg>",
+    "heroEmoji": "🗼"
   },
   "currency": {
     "local": "JPY",
