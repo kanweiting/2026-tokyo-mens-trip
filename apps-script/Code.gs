@@ -101,3 +101,8 @@ function resolve_(url) {
   const name = n ? decodeURIComponent(n[1].replace(/\+/g, ' ')) : '';
   return [{ name: name, address: '', lat: +m[1], lng: +m[2], map: url }];
 }
+
+// 在編輯器選這個函式按「執行」，會跳出 Google Drive 授權（收據照片要用）
+function authorizeDrive() {
+  DriveApp.getRootFolder();
+}
