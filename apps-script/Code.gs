@@ -104,5 +104,6 @@ function resolve_(url) {
 
 // 在編輯器選這個函式按「執行」，會跳出 Google Drive 授權（收據照片要用）
 function authorizeDrive() {
-  DriveApp.getRootFolder();
+  const f = DriveApp.createFolder('授權測試_可刪除');
+  f.setTrashed(true);
 }
