@@ -13,7 +13,9 @@ P = lambda *a: os.path.join(ROOT, *a)
 load = lambda f, d=None: json.load(open(P(f), encoding='utf-8')) if os.path.exists(P(f)) else d
 save = lambda f, o, **k: json.dump(o, open(P(f), 'w', encoding='utf-8'), ensure_ascii=False, **k)
 
-trip = load('data/trip.json'); CFG = trip['sheet']
+trip = load('data/trip.json'); CFG = trip.get('sheet') or {}
+if not CFG.get('id'):
+    print('trip.json 沒有設定 sheet.id，略過 Sheet 同步'); sys.exit(0)
 AREAS = load('data/areas.json')
 CITY = {'name': '東京', 'nameEn': 'Tokyo', 'center': [35.68, 139.76], 'bbox': [35.5, 139.4, 35.9, 140.0], 'region': 'jp', **(json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'trip.json'), encoding='utf-8')).get('city') or {})}
 base = load('data/src/base_places.json')
