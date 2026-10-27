@@ -726,17 +726,27 @@ function renderStats() {
 }
 
 /* ---------- 記帳 ---------- */
-const toBase = (amt, cur) => cur === trip.baseCurrency ? amt : amt * (trip.fx[cur] || 1);
+// 每筆帳用「消費當天」的台銀匯率換算（trip.json fxDaily；沒有那天就用前一個有的日期）
+function fxOn(date) {
+  const tbl = trip.fxDaily || {}, days = Object.keys(tbl).filter(k => /^\d{4}-/.test(k)).sort();
+  if (!days.length) return { rate: 1 / (trip.fx.TWD || 4.7), src: '固定匯率' };
+  const d = days.filter(k => k <= (date || days[days.length - 1])).pop() || days[0];
+  return tbl[d];
+}
+const SETTLE_DAY = () => trip.dates[trip.dates.length - 1];
+const dOf = e => (e.at || '').slice(0, 10);
+const toBase = (amt, cur, date) => cur === trip.baseCurrency ? amt : amt / fxOn(date).rate;   // → 日圓
+const toTwd = (amt, cur, date) => cur === 'TWD' ? amt : amt * fxOn(date).rate;              // → 台幣
 const presentOn = (id, date) => { const m = trip.members.find(x => x.id === id); return !date || ((!m.from || date >= m.from) && (!m.until || date <= m.until)); };
 const curSym = c => c === 'JPY' ? '¥' : c === 'TWD' ? 'NT$' : c + ' ';
-const twd = v => trip.fx.TWD ? `≈ NT$${fmt(v / trip.fx.TWD)}` : '';
+const twd = (v, date) => `≈ NT$${fmt(toTwd(v, 'JPY', date || SETTLE_DAY()))}`;
 function norm(e) { // 相容舊格式
   return { ...e, at: e.at || (e.date ? e.date + 'T12:00' : (e.createdAt || e.ts || '').slice(0, 16)), people: e.people || e.split || trip.members.map(m => m.id),
     mode: e.mode || 'equal', cat: e.cat || 'other', shares: e.shares || {} };
 }
 function owed(e) { // 每人應負擔（基準幣）
-  e = norm(e); const total = toBase(+e.amount, e.currency), out = {};
-  if (e.mode === 'amount') e.people.forEach(id => out[id] = toBase(+e.shares[id] || 0, e.currency));
+  e = norm(e); const total = toBase(+e.amount, e.currency, dOf(e)), out = {};
+  if (e.mode === 'amount') e.people.forEach(id => out[id] = toBase(+e.shares[id] || 0, e.currency, dOf(e)));
   else if (e.mode === 'ratio') { const s = e.people.reduce((a, id) => a + (+e.shares[id] || 0), 0) || 1; e.people.forEach(id => out[id] = total * (+e.shares[id] || 0) / s); }
   else e.people.forEach(id => out[id] = total / e.people.length);
   return out;
@@ -744,51 +754,64 @@ function owed(e) { // 每人應負擔（基準幣）
 function ledger() {
   const ex = Store.of('exp').map(norm).sort((a, b) => b.at.localeCompare(a.at));
   const bal = Object.fromEntries(trip.members.map(m => [m.id, 0])), paid = { ...bal }, share = { ...bal };
-  for (const e of ex) { const v = toBase(+e.amount, e.currency); paid[e.payer] = (paid[e.payer] || 0) + v; for (const [id, o] of Object.entries(owed(e))) share[id] = (share[id] || 0) + o; }
+  for (const e of ex) { const v = toBase(+e.amount, e.currency, dOf(e)); paid[e.payer] = (paid[e.payer] || 0) + v; for (const [id, o] of Object.entries(owed(e))) share[id] = (share[id] || 0) + o; }
   for (const id in bal) bal[id] = paid[id] - share[id];
+  // 已核銷的轉帳：from 付給 to，雙方的差額跟著抵掉
+  const settles = Store.of('settle').sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
+  for (const st of settles) { bal[st.from] = (bal[st.from] || 0) + +st.amount; bal[st.to] = (bal[st.to] || 0) - +st.amount; }
   const cr = Object.entries(bal).filter(x => x[1] > 0.5).sort((a, b) => b[1] - a[1]).map(x => [...x]);
   const db = Object.entries(bal).filter(x => x[1] < -0.5).map(([k, v]) => [k, -v]).sort((a, b) => b[1] - a[1]);
   const tx = [];
   while (cr.length && db.length) { const v = Math.min(cr[0][1], db[0][1]); tx.push([db[0][0], cr[0][0], v]); cr[0][1] -= v; db[0][1] -= v; if (cr[0][1] < 0.5) cr.shift(); if (db[0][1] < 0.5) db.shift(); }
-  return { ex, bal, paid, share, tx, total: ex.reduce((s, e) => s + toBase(+e.amount, e.currency), 0) };
+  return { ex, bal, paid, share, tx, settles, total: ex.reduce((s, e) => s + toBase(+e.amount, e.currency, dOf(e)), 0),
+    totalTwd: ex.reduce((s, e) => s + toTwd(+e.amount, e.currency, dOf(e)), 0) };
 }
 function renderMoney() {
   const L0 = ledger(), me = S.me;
-  $('#moneyHero').innerHTML = `<div class="k">團體總花費</div><div class="v">¥${fmt(L0.total)}<small>${twd(L0.total)}</small></div>
+  $('#moneyHero').innerHTML = `<div class="k">團體總花費</div><div class="v">¥${fmt(L0.total)}<small>≈ NT$${fmt(L0.totalTwd)}</small></div>
     <div class="grid3">
       <div><span class="k">${me ? '我付了' : '筆數'}</span><b>${me ? '¥' + fmt(L0.paid[me]) : L0.ex.length}</b></div>
       <div><span class="k">${me ? '我的花費' : '人均'}</span><b>¥${fmt(me ? L0.share[me] : L0.total / trip.members.length)}</b></div>
-      <div><span class="k">${me ? (L0.bal[me] >= 0 ? '我應收' : '我應付') : '待結清'}</span><b class="${me ? (L0.bal[me] >= 0 ? 'pos' : 'neg') : ''}">${me ? '¥' + fmt(Math.abs(L0.bal[me])) : L0.tx.length + ' 筆'}</b></div>
+      ${me && Math.abs(L0.bal[me]) < 1 ? '<div><span class="k">我的帳</span><b class="pos">已結清 ✓</b></div>'
+        : `<div><span class="k">${me ? (L0.bal[me] >= 0 ? '我應收' : '我應付') : '待結清'}</span><b class="${me ? (L0.bal[me] >= 0 ? 'pos' : 'neg') : ''}">${me ? '¥' + fmt(Math.abs(L0.bal[me])) : L0.tx.length + ' 筆'}</b></div>`}
     </div>`;
   $$('#moneySeg button').forEach(b => b.classList.toggle('on', b.dataset.mview === S.mview));
   const body = $('#moneyBody');
   if (S.mview === 'list') {
     if (!L0.ex.length) return (body.innerHTML = '<div class="empty">還沒有任何一筆<br><span class="small">按右下角 ＋ 開始記帳</span></div>');
     const groups = {}; L0.ex.forEach(e => (groups[e.at.slice(0, 10)] ||= []).push(e));
-    const sub = es => es.reduce((s, e) => s + toBase(+e.amount, e.currency), 0), mySub = es => me ? es.reduce((s, e) => s + (owed(e)[me] || 0), 0) : 0;
+    const sub = es => es.reduce((s, e) => s + toBase(+e.amount, e.currency, dOf(e)), 0), mySub = es => me ? es.reduce((s, e) => s + (owed(e)[me] || 0), 0) : 0;
     body.innerHTML = Object.entries(groups).map(([d, es]) => `<div class="day-group"><span>${trip.dates.includes(d) ? `D${dayNo(d)} · ` : ''}${dayLabel(d)} · ${es.length} 筆</span><span>小計 ¥${fmt(sub(es))}${me ? `<small> · 我 ¥${fmt(mySub(es))}</small>` : ''}</span></div>` +
       es.map(e => { const c = CAT[e.cat] || CAT.other, mine = me ? owed(e)[me] || 0 : null;
         return `<button class="exp" data-exp="${e.id}"><div class="icon-tile sm" style="--c:var(--seq)">${c.icon}</div>
           <div class="body"><div class="t">${e.photo ? '📷 ' : ''}${h(e.title)}</div><div class="s">${e.at.slice(11, 16)} · ${h(memberName(e.payer))} 付 · ${e.people.length === trip.members.length ? '全部人' : e.people.length + ' 人'}${{ ratio: '·比例', amount: '·指定金額' }[e.mode] || ''}</div></div>
-          <div class="amt">${curSym(e.currency)}${fmt(+e.amount)}${mine != null ? `<small class="${mine ? '' : 'muted'}">${mine ? '我 ¥' + fmt(mine) : '與我無關'}</small>` : ''}</div></button>`; }).join('')).join('') +
-      `<div class="grand"><span>總計 · ${L0.ex.length} 筆</span><b>¥${fmt(L0.total)}</b><small>${twd(L0.total)}${me ? ` · 我 ¥${fmt(L0.share[me])}` : ''}</small></div>`;
+          <div class="amt">${curSym(e.currency)}${fmt(+e.amount)}${e.currency !== 'JPY' ? `<small class="muted">≈ ¥${fmt(toBase(+e.amount, e.currency, dOf(e)))} · ${fxOn(dOf(e)).rate}</small>` : ''}${mine != null ? `<small class="${mine ? '' : 'muted'}">${mine ? '我 ¥' + fmt(mine) : '與我無關'}</small>` : ''}</div></button>`; }).join('')).join('') +
+      `<div class="grand"><span>總計 · ${L0.ex.length} 筆</span><b>¥${fmt(L0.total)}</b><small>≈ NT$${fmt(L0.totalTwd)}（每筆用當天台銀匯率）${me ? ` · 我 ¥${fmt(L0.share[me])}` : ''}</small></div>`;
   } else if (S.mview === 'daily') {
     const days = [...new Set([...trip.dates, ...L0.ex.map(e => e.at.slice(0, 10))])].sort(), ms = trip.members;
-    const cell = (d, id) => L0.ex.filter(e => e.at.slice(0, 10) === d).reduce((s, e) => s + (id ? owed(e)[id] || 0 : toBase(+e.amount, e.currency)), 0);
+    const cell = (d, id) => L0.ex.filter(e => e.at.slice(0, 10) === d).reduce((s, e) => s + (id ? owed(e)[id] || 0 : toBase(+e.amount, e.currency, dOf(e))), 0);
     body.innerHTML = `<div class="panel" style="margin-top:0"><div class="panel-head"><h3>每日小計</h3><span class="muted small">每人＝應負擔金額（¥）</span></div>
       <div class="matrix"><table class="daily"><tr><th>日期</th>${ms.map(m => `<th>${av(m.id)}</th>`).join('')}<th>小計</th></tr>
-      ${days.map(d => `<tr><td>${trip.dates.includes(d) ? `<b>D${dayNo(d)}</b> ` : ''}${md(d)}</td>${ms.map(m => { const v = cell(d, m.id); return `<td class="${v ? '' : 'muted'}">${v ? fmt(v) : '–'}</td>`; }).join('')}<td><b>${fmt(cell(d))}</b></td></tr>`).join('')}
+      ${days.map(d => `<tr><td>${trip.dates.includes(d) ? `<b>D${dayNo(d)}</b> ` : ''}${md(d)}<div class="fx-cell">匯率 ${fxOn(d).rate}</div></td>${ms.map(m => { const v = cell(d, m.id); return `<td class="${v ? '' : 'muted'}">${v ? fmt(v) : '–'}</td>`; }).join('')}<td><b>${fmt(cell(d))}</b></td></tr>`).join('')}
       <tr class="total"><td>總計</td>${ms.map(m => `<td>${fmt(L0.share[m.id])}</td>`).join('')}<td>${fmt(L0.total)}</td></tr></table></div>
-      <div class="muted small" style="margin-top:8px">總計 ¥${fmt(L0.total)}（${twd(L0.total)}）· 匯率 1 TWD = ${trip.fx.TWD} JPY</div></div>`;
+      <div class="muted small" style="margin-top:8px">總計 ¥${fmt(L0.total)}（≈ NT$${fmt(L0.totalTwd)}）<br>匯率＝1 日圓兌台幣，臺灣銀行當天即期買賣中間價的平均；週末沿用前一營業日。台幣記的帳也用當天匯率換成日圓分攤。</div></div>`;
   } else if (S.mview === 'settle') {
-    body.innerHTML = `<div class="sec-head"><h3>結清建議</h3><span>最少轉帳次數</span></div>` +
-      (L0.tx.length ? L0.tx.map(([a, b, v]) => `<div class="settle">${av(a)}<b>${h(memberName(a))}</b><span class="arrow">${ICON.arrow}</span>${av(b)}<b>${h(memberName(b))}</b>
-        <div class="amt">¥${fmt(v)}<small>${twd(v)}</small></div></div>`).join('') : '<div class="empty">目前不用轉帳 👍</div>') +
+    const sd = SETTLE_DAY(), fxs = fxOn(sd);
+    body.innerHTML = `<div class="sec-head"><h3>結清建議</h3><span>最少轉帳次數 · 台幣用 ${h(fxs.src)} ${fxs.rate}</span></div>` +
+      (L0.tx.length ? L0.tx.map(([a, b, v]) => { const amt = Math.round(v);
+        return `<div class="settle">${av(a)}<b>${h(memberName(a))}</b><span class="arrow">${ICON.arrow}</span>${av(b)}<b>${h(memberName(b))}</b>
+        <div class="amt">¥${fmt(amt)}<small>${twd(amt)}</small></div>
+        ${me === b ? `<button class="mini st-ok" data-settle="${a}|${b}|${amt}">核銷</button>` : `<span class="st-wait">待 ${h(memberName(b))} 核銷</span>`}</div>`; }).join('')
+        : `<div class="empty">${L0.settles.length ? '全部結清了 🎉' : '目前不用轉帳 👍'}</div>`) +
+      (L0.settles.length ? `<div class="sec-head"><h3>已核銷</h3><span>${L0.settles.length} 筆</span></div>` + L0.settles.map(st =>
+        `<div class="settle done">${av(st.from)}<b>${h(memberName(st.from))}</b><span class="arrow">${ICON.arrow}</span>${av(st.to)}<b>${h(memberName(st.to))}</b>
+        <div class="amt">¥${fmt(+st.amount)}<small>✓ ${h(memberName(st.to))} ${h(fmtTs(st.ts))} 確認收到</small></div>
+        ${me === st.to ? `<button class="mini" data-unsettle="${h(st.id)}">取消</button>` : ''}</div>`).join('') : '') +
       `<div class="sec-head"><h3>每人收支</h3><span>付出 − 應負擔</span></div><div class="panel" style="margin-top:0">` +
       trip.members.map(m => `<div class="bal">${av(m.id)}<div><b>${h(m.name)}</b><div class="muted small">付 ¥${fmt(L0.paid[m.id])} · 花 ¥${fmt(L0.share[m.id])}</div></div>
         <div class="amt ${L0.bal[m.id] >= 0 ? 'pos' : 'neg'}">${L0.bal[m.id] >= 0 ? '+' : '−'}¥${fmt(Math.abs(L0.bal[m.id]))}</div></div>`).join('') + '</div>';
   } else {
-    const byCat = CATS.map(c => ({ c, v: L0.ex.filter(e => e.cat === c.id).reduce((s, e) => s + toBase(+e.amount, e.currency), 0) })).filter(x => x.v).sort((a, b) => b.v - a.v);
+    const byCat = CATS.map(c => ({ c, v: L0.ex.filter(e => e.cat === c.id).reduce((s, e) => s + toBase(+e.amount, e.currency, dOf(e)), 0) })).filter(x => x.v).sort((a, b) => b.v - a.v);
     const mx = byCat[0]?.v || 1;
     body.innerHTML = `<div class="panel" style="margin-top:0"><div class="panel-head"><h3>花費分類</h3><span class="muted small">團體合計</span></div>` +
       (byCat.map(x => `<div class="catbar" data-tip="${x.c.name}：¥${fmt(x.v)}（${Math.round(x.v / L0.total * 100)}%）"><span>${x.c.icon} ${x.c.name}</span><div class="track"><div class="fill" style="width:${x.v / mx * 100}%"></div></div><span class="v">¥${fmt(x.v)}</span></div>`).join('') || '<div class="muted">還沒有資料</div>') + '</div>';
@@ -805,6 +828,8 @@ function openExpense(id) {
   const total = () => +F.amount || 0;
   const defaults = () => { if (F.mode === 'ratio') F.people.forEach(i => F.shares[i] = F.shares[i] || 1);
     if (F.mode === 'amount') { const t = total(), each = Math.floor(t / (F.people.length || 1)); F.people.forEach((i, k) => F.shares[i] = k === 0 ? t - each * (F.people.length - 1) : each); } };
+  const fxHint = () => { const d = (F.at || '').slice(0, 10), fx = fxOn(d), a = +F.amount || 0;
+    return `${a ? (F.currency === 'JPY' ? `≈ NT$${fmt(toTwd(a, 'JPY', d))}` : `≈ ¥${fmt(toBase(a, 'TWD', d))}`) + ' · ' : ''}匯率 1 日圓 = ${fx.rate} 台幣（${h(fx.src)}）`; };
   const calcHtml = () => {
     const t = total(), n = F.people.length || 1;
     if (F.mode === 'equal') return `<div class="split-sum"><span>${F.people.length} 人均分</span><b>每人 ${curSym(F.currency)}${fmt(t / n)}</b></div>`;
@@ -818,7 +843,8 @@ function openExpense(id) {
     return t ? Math.round((+F.shares[i] || 0) / t * 100) + '%' : ''; };
   const draw = () => openSheet(`
     <h2>${old ? '編輯這筆' : '記一筆'}</h2>
-    <div class="field"><div class="amount-row"><span class="cur">${curSym(F.currency)}</span><input id="fAmt" inputmode="decimal" placeholder="0" value="${h(F.amount)}" aria-label="金額"></div></div>
+    <div class="field"><div class="amount-row"><span class="cur">${curSym(F.currency)}</span><input id="fAmt" inputmode="decimal" placeholder="0" value="${h(F.amount)}" aria-label="金額"></div>
+      <div class="muted small fx-hint" id="fxHint">${fxHint()}</div></div>
     <div class="receipt">
       ${F.preview || F.photo ? `<a ${F.photo ? `href="${h(photoLink(F.photo))}" target="_blank" rel="noopener"` : ''}><img src="${h(F.preview || photoUrl(F.photo))}" alt="收據"></a>` : ''}
       <div class="rc-body"><label class="btn-soft rc-btn">📷 ${F.preview || F.photo ? '換一張收據' : '拍收據／上傳照片，自動帶入金額和時間'}<input type="file" id="fPhoto" accept="image/*" hidden></label>
@@ -876,7 +902,7 @@ function openExpense(id) {
     const del = el.querySelector('[data-del]'); if (del) del.onclick = async () => { if (!confirm('確定刪除這筆？')) return; await Store.del(old.id); closeSheet(); toast('已刪除'); renderMoney(); };
   }
   let touchedShares = !!old && old.mode === 'amount';
-  function refresh(el) { el.querySelector('#splitSum').innerHTML = calcHtml(); F.people.forEach(i => { const c = el.querySelector(`[data-calc="${i}"]`); if (c) c.textContent = rowCalc(i); }); el.querySelector('.cur').textContent = curSym(F.currency); }
+  function refresh(el) { const fh = el.querySelector('#fxHint'); if (fh) fh.innerHTML = fxHint(); el.querySelector('#splitSum').innerHTML = calcHtml(); F.people.forEach(i => { const c = el.querySelector(`[data-calc="${i}"]`); if (c) c.textContent = rowCalc(i); }); el.querySelector('.cur').textContent = curSym(F.currency); }
   async function save(el) {
     keep(el);
     const t = total();
@@ -952,6 +978,17 @@ function bind() {
   $('#meBtn').onclick = pickMe;
   $('#backdrop').onclick = () => closeSheet();
   $('#addExpBtn').onclick = () => openExpense();
+  $('#moneyBody').addEventListener('click', async e => {
+    const ok = e.target.closest('[data-settle]'), un = e.target.closest('[data-unsettle]');
+    if (ok) { const [from, to, amount] = ok.dataset.settle.split('|');
+      if (S.me !== to) return toast('只有收款的人可以核銷');
+      if (!confirm(`確認已經收到 ${memberName(from)} 轉來的 ¥${fmt(+amount)}？`)) return;
+      await Store.put({ kind: 'settle', from, to, amount: +amount }); toast('已核銷 ✓'); return renderMoney(); }
+    if (un) { const st = Store.of('settle').find(x => x.id === un.dataset.unsettle);
+      if (!st || S.me !== st.to) return toast('只有收款的人可以取消');
+      if (!confirm(`取消這筆核銷（${memberName(st.from)} → ${memberName(st.to)} ¥${fmt(+st.amount)}）？`)) return;
+      await Store.del(st.id); toast('已取消核銷'); renderMoney(); }
+  });
   $('#moneySeg').onclick = e => { const b = e.target.closest('[data-mview]'); if (b) { S.mview = b.dataset.mview; renderMoney(); } };
   document.addEventListener('click', async e => {
     const t = e.target.closest('[data-fav],[data-day],[data-hide],[data-showall],[data-hideall],[data-favlayer],[data-type],[data-route],[data-clear-route],[data-exp],[data-sysrm],[data-sumedit],[data-pedit-tl],[data-gsearch],[data-open],[data-area]');
