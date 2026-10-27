@@ -14,8 +14,10 @@ load = lambda f, d=None: json.load(open(P(f), encoding='utf-8')) if os.path.exis
 save = lambda f, o, **k: json.dump(o, open(P(f), 'w', encoding='utf-8'), ensure_ascii=False, **k)
 
 trip = load('data/trip.json'); CFG = trip.get('sheet') or {}
-if not CFG.get('id'):
-    print('trip.json 沒有設定 sheet.id，略過 Sheet 同步'); sys.exit(0)
+if not CFG.get('id'):   # 沒有 Sheet：直接用 base_places 當 places.json
+    save('data/places.json', load('data/src/base_places.json', []), indent=0)
+    if not os.path.exists(P('data/sheet_plan.json')): save('data/sheet_plan.json', {'days': {}, 'wish': {}}, indent=1)
+    print('trip.json 沒有設定 sheet.id：data/places.json ← data/src/base_places.json'); sys.exit(0)
 AREAS = load('data/areas.json')
 CITY = {'name': '東京', 'nameEn': 'Tokyo', 'center': [35.68, 139.76], 'bbox': [35.5, 139.4, 35.9, 140.0], 'region': 'jp', **(json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'trip.json'), encoding='utf-8')).get('city') or {})}
 base = load('data/src/base_places.json')

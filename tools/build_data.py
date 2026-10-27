@@ -61,7 +61,8 @@ def geocode(q):
 
 # ---------- Sheet ----------
 places = []
-for x in json.load(open(os.path.join(RAW, 'restaurants_raw.json'), encoding='utf-8')):
+_rr = os.path.join(RAW, 'restaurants_raw.json')   # 選用：舊版 Sheet 抽取結果；新流程由 sync_sheet.py 處理 Sheet
+for x in (json.load(open(_rr, encoding='utf-8')) if os.path.exists(_rr) else []):
     name = (x['name'] or '').split('\n')[0].strip() or (x['mapName'] or '').strip()
     if not name or not x['lat']: continue           # 超商、整理清單等沒有地點的列不收
     vt = x['vote'] or ''
@@ -85,9 +86,10 @@ def find(n1, n2):
             if len(kk) >= 5 and len(k) >= 5 and (kk in k or k in kk): return p
     return None
 
-# IG 顯示名稱 → trip.json 成員 id（網站上顯示的名字以 trip.json 為準）
-NICK = {'Jerry Kan': 'jerry', 'Aron Lin': 'aron', 'Chung Kai Yu': 'kaiyu', '盅舖師': 'kaiyu'}   # 盅舖師＝Kaiyu 的企業帳號；偉不在 IG 群組
-SHORT = lambda s: NICK.get(s, 'eddie' if 'Eddie' in s or '𝑬𝒅𝒅𝒊𝒆' in s else s)
+# IG／Threads 顯示名稱 → trip.json 成員 id（在成員的 aliases 列出他在 IG 上的名字，可以有好幾個）
+_TRIP = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'trip.json'), encoding='utf-8'))
+NICK = {a: m['id'] for m in _TRIP['members'] for a in m.get('aliases', [])}
+SHORT = lambda s: NICK.get(s) or next((mid for a, mid in NICK.items() if a and a in s), s)
 def excerpt(cap, names):
     """從貼文文案切出跟這個地點有關的一段（約 120 字），當作「評論」顯示"""
     cap = re.sub(r'#\S+', '', cap or '')
@@ -120,7 +122,8 @@ def register(p):
     for k in (norm(p['name']), norm(p['name_en'])):
         if len(k) >= 3: idx[k] = p
 
-captions = {l['url'].split('?')[0]: l for l in json.load(open(os.path.join(RAW, 'ig_links.json'), encoding='utf-8'))}
+_il = os.path.join(RAW, 'ig_links.json')
+captions = {l['url'].split('?')[0]: l for l in (json.load(open(_il, encoding='utf-8')) if os.path.exists(_il) else [])}
 # subagent 從文案挑出的評論句（ig_quotes_*.json）；沒有這些檔才退回機械式摘錄
 QUOTES = {}
 for f in glob.glob(os.path.join(RAW, 'ig_quotes_*.json')):
@@ -175,7 +178,7 @@ GM_FOOD = [('餐廳', r'拉麵|ラーメン|ramen|カレー|curry|食堂|天助|
            ('咖啡/甜點', r'coffee|cafe|café|カフェ|喫茶|コーヒー|bakery|パン|donut|ドーナツ|tea|甜'),
            ('Bar/居酒屋', r'bar|バー|居酒屋|酒|club|womb|beer|ビール')]
 n_gm = 0
-gm_p = os.path.join(RAW, 'gm_list.json')
+gm_p = os.path.join(RAW, 'gm_list.json')   # 選用：tools/importers/gmaps_list.py 也可以直接併進 base_places
 for q in (json.load(open(gm_p, encoding='utf-8')) if os.path.exists(gm_p) else []):
     p = find(q['name'], '')
     if not p and q.get('lat'):

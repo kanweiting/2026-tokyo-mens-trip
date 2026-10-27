@@ -16,28 +16,43 @@
     {
       "id": "jerry",
       "name": "甘",
-      "en": "Jerry"
+      "en": "Jerry",
+      "aliases": [
+        "Jerry Kan"
+      ]
     },
     {
       "id": "eddie",
       "name": "煊",
-      "en": "Eddie"
+      "en": "Eddie",
+      "aliases": [
+        "Eddie Wang",
+        "𝑬𝒅𝒅𝒊𝒆 𝑾𝒂𝒏𝒈"
+      ]
     },
     {
       "id": "aron",
       "name": "芃",
-      "en": "Aron"
+      "en": "Aron",
+      "aliases": [
+        "Aron Lin"
+      ]
     },
     {
       "id": "kaiyu",
       "name": "凱",
-      "en": "Kaiyu"
+      "en": "Kaiyu",
+      "aliases": [
+        "Chung Kai Yu",
+        "盅舖師"
+      ]
     },
     {
       "id": "wei",
       "name": "偉",
       "until": "2026-10-19",
-      "en": "Yuwei"
+      "en": "Yuwei",
+      "aliases": []
     }
   ],
   "flights": [

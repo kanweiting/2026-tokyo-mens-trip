@@ -735,7 +735,7 @@ function renderStats() {
 // 每筆帳用「消費當天」的台銀匯率換算（trip.json fxDaily；沒有那天就用前一個有的日期）
 function fxOn(date) {
   const tbl = trip.fxDaily || {}, days = Object.keys(tbl).filter(k => /^\d{4}-/.test(k)).sort();
-  if (!days.length) return { rate: 1 / (trip.fx.TWD || 4.7), src: '固定匯率' };
+  if (!days.length) return { rate: 1 / ((trip.fx || {})[CUR().home] || 1), src: '固定匯率' };
   const d = days.filter(k => k <= (date || days[days.length - 1])).pop() || days[0];
   return tbl[d];
 }
